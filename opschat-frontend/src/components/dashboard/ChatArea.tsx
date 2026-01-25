@@ -1,18 +1,27 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
     Plus, MessageSquare, UserPlus, Hash, User, Activity, Bell, Info,
     MoreVertical, Sparkles, Mic, Send, Paperclip, Check, ChevronRight,
-    Terminal, Globe, X, Square
+    Terminal, Globe, X, Square, Command // Moved Command here
 } from 'lucide-react';
 import { InputField } from '../ui/InputField';
 import type { ViewState } from '../../types';
+import { socket } from '../../socket';
 
 interface ChatAreaProps {
     activeView: ViewState;
     showAddPerson: boolean;
     setShowAddPerson: (show: boolean) => void;
-    socketConnected: boolean; 
+    socketConnected: boolean;
+}
+
+interface Message {
+    id: string;
+    room: string;
+    author: string;
+    message: string;
+    time: string;
 }
 
 export const ChatArea: React.FC<ChatAreaProps> = ({
@@ -21,20 +30,67 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
     setShowAddPerson,
     socketConnected
 }) => {
+    const [messages, setMessages] = useState<Message[]>([]);
+    const [messageInput, setMessageInput] = useState("");
+    const [username] = useState("User_" + Math.floor(Math.random() * 1000));
+    const messagesEndRef = useRef<HTMLDivElement>(null);
+
     const [isSummarizing, setIsSummarizing] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const [requestStatus, setRequestStatus] = useState<'sending' | 'success' | null>(null);
-    const [selectedLang, setSelectedLang] = useState('EN'); // Language State
+    const [selectedLang, setSelectedLang] = useState('EN'); 
     const [isRecording, setIsRecording] = useState(false);
     const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const chunksRef = useRef<Blob[]>([]);
 
+    // --- Socket Logic ---
+    useEffect(() => {
+        if (!activeView.id) return;
+
+        console.log(`Joining room: ${activeView.id}`); // Debug Log
+        socket.connect();
+        socket.emit("join_room", activeView.id);
+
+        const handleReceiveMessage = (data: Message) => {
+            console.log("Message received from server:", data); // Debug Log
+            setMessages((prev) => [...prev, data]);
+        };
+
+        socket.on("receive_message", handleReceiveMessage);
+
+        return () => {
+            socket.off("receive_message", handleReceiveMessage);
+        }
+    }, [activeView.id]);
+
+    useEffect(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, [messages]);
+
+    const handleSendMessage = async () => {
+        if (messageInput.trim() === "") return;
+
+        const messageData: Message = {
+            id: Math.random().toString(36).substr(2, 9),
+            room: activeView.id!,
+            author: username,
+            message: messageInput,
+            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        };
+
+        console.log("Sending message:", messageData); 
+        await socket.emit("send_message", messageData);
+
+        setMessages((list) => [...list, messageData]);
+        setMessageInput("");
+    };
+
     const startRecording = async () => {
         try {
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
             mediaRecorderRef.current = new MediaRecorder(stream);
-            chunksRef.current = []; 
+            chunksRef.current = [];
 
             mediaRecorderRef.current.ondataavailable = (e) => {
                 if (e.data.size > 0) {
@@ -45,7 +101,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
             mediaRecorderRef.current.onstop = () => {
                 const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
                 setAudioBlob(blob);
-                console.log("Audio Blob Created:", blob); 
+                console.log("Audio Blob Created:", blob);
                 stream.getTracks().forEach(track => track.stop());
             };
 
@@ -86,7 +142,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
     };
 
     return (
-        <main className="flex-1 flex flex-col relative bg-white dark:bg-slate-900 transition-colors">
+        <main className="flex-1 flex flex-col relative bg-white dark:bg-slate-900 transition-colors h-full overflow-hidden">
             <AnimatePresence mode="wait">
                 {!activeView.type ? (
                     <motion.div
@@ -96,7 +152,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                         exit={{ opacity: 0, scale: 1.05 }}
                         className="flex-1 flex flex-col items-center justify-center p-12 text-center"
                     >
-                        <div className="w-32 h-32 bg-[#b5f2a1]/10 rounded-full flex items-center justify-center mb-8 relative">
+                         <div className="w-32 h-32 bg-[#b5f2a1]/10 rounded-full flex items-center justify-center mb-8 relative">
                             <motion.div
                                 animate={{ rotate: 360 }}
                                 transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
@@ -129,9 +185,9 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                         key="chat"
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
-                        className="flex-1 flex flex-col"
+                        className="flex-1 flex flex-col h-full overflow-hidden"
                     >
-                        <header className="h-20 border-b border-slate-50 dark:border-slate-800 px-8 flex items-center justify-between bg-white/80 dark:bg-slate-900/80 backdrop-blur-md z-10">
+                        <header className="h-20 flex-shrink-0 border-b border-slate-50 dark:border-slate-800 px-8 flex items-center justify-between bg-white/80 dark:bg-slate-900/80 backdrop-blur-md z-10">
                             <div className="flex items-center gap-4">
                                 <div className="w-10 h-10 rounded-xl bg-slate-50 dark:bg-slate-800 flex items-center justify-center text-slate-400 dark:text-slate-500">
                                     {activeView.type === 'channel' ? <Hash className="w-5 h-5" /> : <User className="w-5 h-5" />}
@@ -184,20 +240,36 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                                 </div>
                             </div>
 
-                            <div className="flex gap-4">
-                                <div className="w-10 h-10 rounded-xl bg-blue-100 dark:bg-blue-900 flex items-center justify-center text-blue-600 dark:text-blue-300 font-bold">AR</div>
-                                <div className="flex-1 space-y-2">
-                                    <div className="flex items-center gap-2">
-                                        <span className="text-xs font-black text-slate-900 dark:text-white">Alex Rivera</span>
-                                        <span className="text-[9px] font-bold text-slate-300 dark:text-slate-600">10:42 AM</span>
+                            {messages.map((msg) => {
+                                const isMe = msg.author === username;
+                                return (
+                                    <div key={msg.id} className={`flex gap-4 ${isMe ? 'flex-row-reverse' : ''}`}>
+                                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold ${
+                                            isMe 
+                                            ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900' 
+                                            : 'bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300'
+                                        }`}>
+                                            {isMe ? 'ME' : msg.author.substring(0, 2).toUpperCase()}
+                                        </div>
+                                        <div className={`flex-1 space-y-2 ${isMe ? 'flex flex-col items-end' : ''}`}>
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-xs font-black text-slate-900 dark:text-white">{msg.author}</span>
+                                                <span className="text-[9px] font-bold text-slate-300 dark:text-slate-600">{msg.time}</span>
+                                            </div>
+                                            <div className={`${
+                                                isMe 
+                                                ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-tr-none' 
+                                                : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-tl-none border border-slate-100 dark:border-slate-700'
+                                            } p-4 rounded-2xl inline-block max-w-xl shadow-sm`}>
+                                                <p className="text-sm leading-relaxed">
+                                                    {msg.message}
+                                                </p>
+                                            </div>
+                                        </div>
                                     </div>
-                                    <div className="bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700 p-4 rounded-2xl rounded-tl-none inline-block max-w-xl shadow-sm">
-                                        <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
-                                            I've initialized the horizontal scaling logic for the {activeView.id} stream. All pods reporting healthy status.
-                                        </p>
-                                    </div>
-                                </div>
-                            </div>
+                                );
+                            })}
+                            <div ref={messagesEndRef} />
 
                             {isSummarizing && (
                                 <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="bg-[#b5f2a1]/10 border border-[#b5f2a1]/20 rounded-3xl p-6 relative overflow-hidden mx-auto max-w-2xl">
@@ -211,7 +283,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                             )}
                         </div>
 
-                        <div className="p-8 bg-white dark:bg-slate-900 border-t border-slate-50 dark:border-slate-800">
+                        <div className="flex-shrink-0 p-8 bg-white dark:bg-slate-900 border-t border-slate-50 dark:border-slate-800">
                             <div className="max-w-4xl mx-auto relative">
 
                                 {isRecording ? (
@@ -246,6 +318,9 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
 
                                         <input
                                             type="text"
+                                            value={messageInput}
+                                            onChange={(e) => setMessageInput(e.target.value)}
+                                            onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
                                             placeholder={`Message ${activeView.type === 'channel' ? '#' + activeView.id : activeView.id}...`}
                                             className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-3xl py-5 pl-24 pr-32 text-sm font-medium text-slate-900 dark:text-white focus:outline-none focus:border-[#b5f2a1] transition-all placeholder:text-slate-300 dark:placeholder:text-slate-600"
                                         />
@@ -262,7 +337,9 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                                                 <Mic className="w-5 h-5 text-slate-300 dark:text-slate-600 cursor-pointer hover:text-red-500 dark:hover:text-red-400 transition-colors" />
                                             </button>
 
-                                            <button className="bg-slate-900 dark:bg-white text-white dark:text-slate-900 p-3 rounded-xl shadow-xl shadow-slate-200 dark:shadow-none hover:scale-105 active:scale-95 transition-all">
+                                            <button
+                                                onClick={handleSendMessage}
+                                                className="bg-slate-900 dark:bg-white text-white dark:text-slate-900 p-3 rounded-xl shadow-xl shadow-slate-200 dark:shadow-none hover:scale-105 active:scale-95 transition-all">
                                                 <Send className="w-4 h-4" />
                                             </button>
                                         </div>
@@ -321,5 +398,3 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
         </main>
     );
 };
-
-import { Command } from 'lucide-react';
