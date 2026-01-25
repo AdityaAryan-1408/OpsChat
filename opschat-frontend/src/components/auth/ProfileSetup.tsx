@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
-import { Zap, User, Terminal, Activity, ArrowRight, Camera, Upload, Check } from 'lucide-react';
+import { Zap, User, Terminal, Activity, ArrowRight, Camera, Upload, Check, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { InputField } from '../ui/InputField';
-import { ThemeToggle } from '../ui/ThemeToggle.tsx';
+import { ThemeToggle } from '../ui/ThemeToggle';
 
 export const ProfileSetup = () => {
     const navigate = useNavigate();
@@ -14,7 +14,13 @@ export const ProfileSetup = () => {
         age: '',
         gender: 'Prefer not to say'
     });
-    const [selectedAvatar, setSelectedAvatar] = useState<number | null>(null);
+
+    const [isChecking, setIsChecking] = useState(false);
+    const [isRegistering, setIsRegistering] = useState(false);
+    const [usernameError, setUsernameError] = useState<string | null>(null);
+    const [usernameSuccess, setUsernameSuccess] = useState(false);
+
+    const [selectedAvatar, setSelectedAvatar] = useState<number | null>(1);
 
     const avatars = [
         { id: 1, color: 'bg-blue-400' },
@@ -25,9 +31,82 @@ export const ProfileSetup = () => {
         { id: 6, color: 'bg-[#b5f2a1]' },
     ];
 
-    const handleComplete = () => {
-        localStorage.setItem('userProfile', JSON.stringify(formData));
-        navigate('/dashboard');
+    const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+
+    const handleContinue = async () => {
+        setUsernameError(null);
+        setIsChecking(true);
+
+        try {
+
+            const response = await fetch(`${API_URL}/api/check-username`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username: formData.username })
+            });
+
+            const data = await response.json();
+
+            if (response.ok && data.available) {
+
+                setUsernameSuccess(true);
+                setTimeout(() => {
+                    setStep(2);
+                    setIsChecking(false);
+                    setUsernameSuccess(false); 
+                }, 800);
+            } else {
+
+                setUsernameError(data.error || "Username is not available");
+                setIsChecking(false);
+            }
+        } catch (error) {
+            console.error("Network error:", error);
+            setUsernameError("Connection failed. Is backend running?");
+            setIsChecking(false);
+        }
+    };
+
+
+    const handleComplete = async () => {
+        setIsRegistering(true);
+        const email = localStorage.getItem('opschat_email'); 
+
+        if (!email) {
+            alert("Session lost. Please sign up again.");
+            navigate('/auth');
+            return;
+        }
+
+        try {
+
+            const response = await fetch(`${API_URL}/api/update-profile`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    email: email, 
+                    ...formData,
+                    avatarId: selectedAvatar
+                })
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+
+                localStorage.setItem('userProfile', JSON.stringify(formData));
+                localStorage.setItem('userAvatar', selectedAvatar?.toString() || '1');
+                localStorage.setItem('opschat_username', formData.username); 
+                navigate('/dashboard');
+            } else {
+                alert(data.error || "Profile update failed.");
+            }
+        } catch (error) {
+            console.error("Profile network error:", error);
+            alert("Failed to update profile. Please check connection.");
+        } finally {
+            setIsRegistering(false);
+        }
     };
 
     return (
@@ -76,13 +155,38 @@ export const ProfileSetup = () => {
                                 value={formData.name}
                                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                             />
-                            <InputField
-                                icon={Terminal}
-                                label="Unique Username"
-                                placeholder="johndoe_ops"
-                                value={formData.username}
-                                onChange={(e) => setFormData({ ...formData, username: e.target.value })}
-                            />
+
+                            <div>
+                                <InputField
+                                    icon={Terminal}
+                                    label="Unique Username"
+                                    placeholder="johndoe_ops"
+                                    value={formData.username}
+                                    onChange={(e) => {
+                                        setFormData({ ...formData, username: e.target.value });
+                                        setUsernameError(null);
+                                        setUsernameSuccess(false);
+                                    }}
+                                />
+                                <div className="h-6 mt-2 ml-1 flex items-center">
+                                    {isChecking && (
+                                        <div className="flex items-center gap-2 text-xs font-bold text-slate-400">
+                                            <Loader2 className="w-3 h-3 animate-spin" /> Checking availability...
+                                        </div>
+                                    )}
+                                    {usernameError && (
+                                        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex items-center gap-2 text-xs font-bold text-red-500">
+                                            <AlertCircle className="w-3 h-3" /> {usernameError}
+                                        </motion.div>
+                                    )}
+                                    {usernameSuccess && (
+                                        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex items-center gap-2 text-xs font-bold text-green-500">
+                                            <CheckCircle2 className="w-3 h-3" /> Username available!
+                                        </motion.div>
+                                    )}
+                                </div>
+                            </div>
+
                             <div className="grid grid-cols-2 gap-4">
                                 <InputField
                                     icon={Activity}
@@ -106,12 +210,14 @@ export const ProfileSetup = () => {
                                     </select>
                                 </div>
                             </div>
+
                             <button
-                                disabled={!formData.name || !formData.username}
-                                onClick={() => setStep(2)}
-                                className="w-full bg-slate-900 dark:bg-white text-white dark:text-slate-900 py-5 rounded-2xl font-black text-lg hover:bg-black dark:hover:bg-slate-100 transition-all flex items-center justify-center gap-2 group disabled:opacity-50"
+                                disabled={!formData.name || !formData.username || isChecking}
+                                onClick={handleContinue}
+                                className="w-full bg-slate-900 dark:bg-white text-white dark:text-slate-900 py-5 rounded-2xl font-black text-lg hover:bg-black dark:hover:bg-slate-100 transition-all flex items-center justify-center gap-2 group disabled:opacity-50 disabled:cursor-not-allowed"
                             >
-                                Continue <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+                                {isChecking ? 'Verifying...' : 'Continue'}
+                                {!isChecking && <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />}
                             </button>
                         </motion.div>
                     ) : (
@@ -147,8 +253,22 @@ export const ProfileSetup = () => {
                             </div>
 
                             <div className="flex gap-4">
-                                <button onClick={() => setStep(1)} className="flex-1 bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 py-5 rounded-2xl font-black text-lg hover:bg-slate-200 dark:hover:bg-slate-600 transition-all">Back</button>
-                                <button onClick={handleComplete} className="flex-[2] bg-slate-900 dark:bg-white text-white dark:text-slate-900 py-5 rounded-2xl font-black text-lg hover:bg-black dark:hover:bg-slate-100 transition-all">Finalize Profile</button>
+                                <button
+                                    onClick={() => {
+                                        setStep(1);
+                                        setUsernameSuccess(false); 
+                                    }}
+                                    className="flex-1 bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 py-5 rounded-2xl font-black text-lg hover:bg-slate-200 dark:hover:bg-slate-600 transition-all"
+                                >
+                                    Back
+                                </button>
+                                <button
+                                    onClick={handleComplete}
+                                    disabled={isRegistering}
+                                    className="flex-[2] bg-slate-900 dark:bg-white text-white dark:text-slate-900 py-5 rounded-2xl font-black text-lg hover:bg-black dark:hover:bg-slate-100 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                                >
+                                    {isRegistering ? 'Creating Profile...' : 'Finalize Profile'}
+                                </button>
                             </div>
                         </motion.div>
                     )}

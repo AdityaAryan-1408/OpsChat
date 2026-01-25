@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
     Plus, MessageSquare, UserPlus, Hash, User, Activity, Bell, Info,
     MoreVertical, Sparkles, Mic, Send, Paperclip, Check, ChevronRight,
-    Terminal, Globe, X, Square, Command // Moved Command here
+    Terminal, Globe, X, Square, Command
 } from 'lucide-react';
 import { InputField } from '../ui/InputField';
 import type { ViewState } from '../../types';
@@ -32,35 +32,53 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
 }) => {
     const [messages, setMessages] = useState<Message[]>([]);
     const [messageInput, setMessageInput] = useState("");
-    const [username] = useState("User_" + Math.floor(Math.random() * 1000));
+    const [username] = useState(() => {
+        const savedUser = localStorage.getItem("opschat_username");
+        if (savedUser) return savedUser;
+
+        const newUser = "User_" + Math.floor(Math.random() * 1000);
+        localStorage.setItem("opschat_username", newUser);
+        return newUser;
+    });
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
     const [isSummarizing, setIsSummarizing] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const [requestStatus, setRequestStatus] = useState<'sending' | 'success' | null>(null);
-    const [selectedLang, setSelectedLang] = useState('EN'); 
+    const [selectedLang, setSelectedLang] = useState('EN');
     const [isRecording, setIsRecording] = useState(false);
     const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const chunksRef = useRef<Blob[]>([]);
 
-    // --- Socket Logic ---
+
     useEffect(() => {
         if (!activeView.id) return;
 
-        console.log(`Joining room: ${activeView.id}`); // Debug Log
+        console.log(`Joining room: ${activeView.id}`);
+
+
+        setMessages([]);
+
         socket.connect();
         socket.emit("join_room", activeView.id);
 
         const handleReceiveMessage = (data: Message) => {
-            console.log("Message received from server:", data); // Debug Log
+            console.log("Message received:", data);
             setMessages((prev) => [...prev, data]);
         };
 
+        const handleLoadHistory = (history: Message[]) => {
+            console.log("History loaded:", history);
+            setMessages(history);
+        };
+
         socket.on("receive_message", handleReceiveMessage);
+        socket.on("load_history", handleLoadHistory);
 
         return () => {
             socket.off("receive_message", handleReceiveMessage);
+            socket.off("load_history", handleLoadHistory);
         }
     }, [activeView.id]);
 
@@ -79,12 +97,13 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
             time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         };
 
-        console.log("Sending message:", messageData); 
+        console.log("Sending message:", messageData);
         await socket.emit("send_message", messageData);
 
         setMessages((list) => [...list, messageData]);
         setMessageInput("");
     };
+
 
     const startRecording = async () => {
         try {
@@ -152,7 +171,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                         exit={{ opacity: 0, scale: 1.05 }}
                         className="flex-1 flex flex-col items-center justify-center p-12 text-center"
                     >
-                         <div className="w-32 h-32 bg-[#b5f2a1]/10 rounded-full flex items-center justify-center mb-8 relative">
+                        <div className="w-32 h-32 bg-[#b5f2a1]/10 rounded-full flex items-center justify-center mb-8 relative">
                             <motion.div
                                 animate={{ rotate: 360 }}
                                 transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
@@ -244,11 +263,10 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                                 const isMe = msg.author === username;
                                 return (
                                     <div key={msg.id} className={`flex gap-4 ${isMe ? 'flex-row-reverse' : ''}`}>
-                                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold ${
-                                            isMe 
-                                            ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900' 
+                                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold ${isMe
+                                            ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900'
                                             : 'bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300'
-                                        }`}>
+                                            }`}>
                                             {isMe ? 'ME' : msg.author.substring(0, 2).toUpperCase()}
                                         </div>
                                         <div className={`flex-1 space-y-2 ${isMe ? 'flex flex-col items-end' : ''}`}>
@@ -256,11 +274,10 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                                                 <span className="text-xs font-black text-slate-900 dark:text-white">{msg.author}</span>
                                                 <span className="text-[9px] font-bold text-slate-300 dark:text-slate-600">{msg.time}</span>
                                             </div>
-                                            <div className={`${
-                                                isMe 
-                                                ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-tr-none' 
+                                            <div className={`${isMe
+                                                ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-tr-none'
                                                 : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-tl-none border border-slate-100 dark:border-slate-700'
-                                            } p-4 rounded-2xl inline-block max-w-xl shadow-sm`}>
+                                                } p-4 rounded-2xl inline-block max-w-xl shadow-sm`}>
                                                 <p className="text-sm leading-relaxed">
                                                     {msg.message}
                                                 </p>
