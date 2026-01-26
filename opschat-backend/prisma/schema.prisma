@@ -7,19 +7,70 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model User {
+  id        Int       @id @default(autoincrement())
+  email     String    @unique
+  password  String
+  username  String?   @unique
+  name      String?
+  createdAt DateTime  @default(now())
+  
+  // Relations
+  messages         Message[]
+  workspaceMembers WorkspaceMember[]
+}
+
+model Workspace {
+  id        Int       @id @default(autoincrement())
+  name      String
+  slug      String    @unique // e.g., "ops-team"
+  ownerId   Int
+  createdAt DateTime  @default(now())
+
+  // Relations
+  channels  Channel[]
+  members   WorkspaceMember[]
+}
+
+model WorkspaceMember {
+  id          Int       @id @default(autoincrement())
+  userId      Int
+  workspaceId Int
+  role        String    @default("MEMBER") // ADMIN, MEMBER
+  joinedAt    DateTime  @default(now())
+
+  user        User      @relation(fields: [userId], references: [id])
+  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+
+  @@unique([userId, workspaceId]) // User can't join the same workspace twice
+}
+
+model Channel {
+  id          Int       @id @default(autoincrement())
+  name        String    // e.g., "general"
+  workspaceId Int
+  createdAt   DateTime  @default(now())
+
+  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+  messages    Message[]
+
+  @@unique([workspaceId, name]) // No duplicate channel names in one workspace
+}
+
 model Message {
   id        Int      @id @default(autoincrement())
   content   String
-  author    String
-  room      String
+  author    String   // Keeping author name for quick UI access
+  userId    Int?     // Optional link to User model
+  
+  // Link to Channel instead of raw string "room"
+  channelId Int
+  
+  // NEW: Self-Destruct Feature
+  expiresAt DateTime? 
+  
   createdAt DateTime @default(now())
-}
 
-model User {
-  id        Int      @id @default(autoincrement())
-  email     String   @unique  // New
-  password  String            // New
-  username  String?  @unique  // Now optional until Profile Setup
-  name      String?           // Optional
-  createdAt DateTime @default(now())
+  channel   Channel @relation(fields: [channelId], references: [id])
+  user      User?   @relation(fields: [userId], references: [id])
 }

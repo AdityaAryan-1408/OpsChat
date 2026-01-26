@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
     Plus, MessageSquare, UserPlus, Hash, User, Activity, Bell, Info,
     MoreVertical, Sparkles, Mic, Send, Paperclip, Check, ChevronRight,
-    Terminal, Globe, X, Square, Command
+    Terminal, Globe, X, Square, Command, Clock
 } from 'lucide-react';
 import { InputField } from '../ui/InputField';
 import type { ViewState } from '../../types';
@@ -18,11 +18,20 @@ interface ChatAreaProps {
 
 interface Message {
     id: string;
-    room: string;
+    channelId?: number;
+    room?: string;
     author: string;
     message: string;
     time: string;
 }
+
+
+const EXPIRY_OPTIONS = [
+    { label: 'Off', value: 0, color: 'text-slate-400' },
+    { label: '10s', value: 10, color: 'text-red-500' },
+    { label: '1m', value: 60, color: 'text-orange-500' },
+    { label: '1h', value: 3600, color: 'text-yellow-500' },
+];
 
 export const ChatArea: React.FC<ChatAreaProps> = ({
     activeView,
@@ -32,53 +41,64 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
 }) => {
     const [messages, setMessages] = useState<Message[]>([]);
     const [messageInput, setMessageInput] = useState("");
-    const [username] = useState(() => {
-        const savedUser = localStorage.getItem("opschat_username");
-        if (savedUser) return savedUser;
 
-        const newUser = "User_" + Math.floor(Math.random() * 1000);
-        localStorage.setItem("opschat_username", newUser);
-        return newUser;
-    });
+
+    const [username] = useState(() => localStorage.getItem("opschat_username") || "Guest");
+
     const messagesEndRef = useRef<HTMLDivElement>(null);
+
 
     const [isSummarizing, setIsSummarizing] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const [requestStatus, setRequestStatus] = useState<'sending' | 'success' | null>(null);
     const [selectedLang, setSelectedLang] = useState('EN');
+
+
     const [isRecording, setIsRecording] = useState(false);
     const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const chunksRef = useRef<Blob[]>([]);
 
 
+    const [expiryIndex, setExpiryIndex] = useState(0);
+    const activeExpiry = EXPIRY_OPTIONS[expiryIndex];
+
+
     useEffect(() => {
         if (!activeView.id) return;
 
-        console.log(`Joining room: ${activeView.id}`);
-
-
+        console.log(`Joining channel: ${activeView.id}`);
         setMessages([]);
 
-        socket.connect();
-        socket.emit("join_room", activeView.id);
+        if (!socket.connected) socket.connect();
+
+        socket.emit("join_channel", {
+            channelName: activeView.id,
+            workspaceId: 1
+        });
 
         const handleReceiveMessage = (data: Message) => {
-            console.log("Message received:", data);
             setMessages((prev) => [...prev, data]);
         };
 
         const handleLoadHistory = (history: Message[]) => {
-            console.log("History loaded:", history);
+            console.log("History loaded:", history.length);
             setMessages(history);
+        };
+
+        const handleError = (err: string) => {
+            console.error("Socket Error:", err);
+
         };
 
         socket.on("receive_message", handleReceiveMessage);
         socket.on("load_history", handleLoadHistory);
+        socket.on("error", handleError);
 
         return () => {
             socket.off("receive_message", handleReceiveMessage);
             socket.off("load_history", handleLoadHistory);
+            socket.off("error", handleError);
         }
     }, [activeView.id]);
 
@@ -86,21 +106,22 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }, [messages]);
 
+
     const handleSendMessage = async () => {
         if (messageInput.trim() === "") return;
 
-        const messageData: Message = {
-            id: Math.random().toString(36).substr(2, 9),
-            room: activeView.id!,
-            author: username,
+
+
+        const payload = {
             message: messageInput,
-            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            author: username,
+            channelName: activeView.id,
+            expiresIn: activeExpiry.value > 0 ? activeExpiry.value : null
         };
 
-        console.log("Sending message:", messageData);
-        await socket.emit("send_message", messageData);
+        console.log("Sending:", payload);
+        socket.emit("send_message", payload);
 
-        setMessages((list) => [...list, messageData]);
         setMessageInput("");
     };
 
@@ -112,15 +133,12 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
             chunksRef.current = [];
 
             mediaRecorderRef.current.ondataavailable = (e) => {
-                if (e.data.size > 0) {
-                    chunksRef.current.push(e.data);
-                }
+                if (e.data.size > 0) chunksRef.current.push(e.data);
             };
 
             mediaRecorderRef.current.onstop = () => {
                 const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
                 setAudioBlob(blob);
-                console.log("Audio Blob Created:", blob);
                 stream.getTracks().forEach(track => track.stop());
             };
 
@@ -128,7 +146,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
             setIsRecording(true);
         } catch (err) {
             console.error("Microphone access denied:", err);
-            alert("Could not access microphone. Please check permissions.");
+            alert("Could not access microphone.");
         }
     };
 
@@ -145,6 +163,10 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
             setIsRecording(false);
             setAudioBlob(null);
         }
+    };
+
+    const toggleExpiry = () => {
+        setExpiryIndex((prev) => (prev + 1) % EXPIRY_OPTIONS.length);
     };
 
     const handleSendRequest = () => {
@@ -171,6 +193,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                         exit={{ opacity: 0, scale: 1.05 }}
                         className="flex-1 flex flex-col items-center justify-center p-12 text-center"
                     >
+                        {/* Empty State UI */}
                         <div className="w-32 h-32 bg-[#b5f2a1]/10 rounded-full flex items-center justify-center mb-8 relative">
                             <motion.div
                                 animate={{ rotate: 360 }}
@@ -251,6 +274,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                             </div>
                         </header>
 
+
                         <div className="flex-1 overflow-y-auto p-8 space-y-8 bg-[#fcfdfe] dark:bg-slate-900/50">
                             <div className="flex justify-center">
                                 <div className="bg-slate-900 dark:bg-slate-700 text-white px-4 py-2 rounded-full flex items-center gap-3 text-[10px] font-bold tracking-tight shadow-xl">
@@ -259,10 +283,10 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                                 </div>
                             </div>
 
-                            {messages.map((msg) => {
+                            {messages.map((msg, index) => {
                                 const isMe = msg.author === username;
                                 return (
-                                    <div key={msg.id} className={`flex gap-4 ${isMe ? 'flex-row-reverse' : ''}`}>
+                                    <div key={index} className={`flex gap-4 ${isMe ? 'flex-row-reverse' : ''}`}>
                                         <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold ${isMe
                                             ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900'
                                             : 'bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300'
@@ -299,6 +323,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                                 </motion.div>
                             )}
                         </div>
+
 
                         <div className="flex-shrink-0 p-8 bg-white dark:bg-slate-900 border-t border-slate-50 dark:border-slate-800">
                             <div className="max-w-4xl mx-auto relative">
@@ -339,10 +364,23 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                                             onChange={(e) => setMessageInput(e.target.value)}
                                             onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
                                             placeholder={`Message ${activeView.type === 'channel' ? '#' + activeView.id : activeView.id}...`}
-                                            className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-3xl py-5 pl-24 pr-32 text-sm font-medium text-slate-900 dark:text-white focus:outline-none focus:border-[#b5f2a1] transition-all placeholder:text-slate-300 dark:placeholder:text-slate-600"
+                                            className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-3xl py-5 pl-24 pr-48 text-sm font-medium text-slate-900 dark:text-white focus:outline-none focus:border-[#b5f2a1] transition-all placeholder:text-slate-300 dark:placeholder:text-slate-600"
                                         />
 
                                         <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-3">
+
+
+                                            <div className="flex items-center gap-1">
+                                                <button
+                                                    onClick={toggleExpiry}
+                                                    className={`p-2 rounded-xl transition-all flex items-center gap-1 ${activeExpiry.color} bg-slate-100 dark:bg-slate-700 hover:brightness-95`}
+                                                    title={`Self-destruct: ${activeExpiry.label}`}
+                                                >
+                                                    <Clock className="w-4 h-4" />
+                                                    {activeExpiry.value > 0 && <span className="text-[10px] font-black">{activeExpiry.label}</span>}
+                                                </button>
+                                            </div>
+
                                             <button
                                                 onClick={() => setIsSummarizing(!isSummarizing)}
                                                 className={`p-2 rounded-xl transition-all ${isSummarizing ? 'bg-slate-900 dark:bg-white text-[#b5f2a1] dark:text-slate-900' : 'bg-slate-100 dark:bg-slate-700 text-slate-400 dark:text-slate-500 hover:text-slate-900 dark:hover:text-white'}`}
@@ -367,6 +405,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                     </motion.div>
                 )}
             </AnimatePresence>
+
 
             <AnimatePresence>
                 {showAddPerson && (
