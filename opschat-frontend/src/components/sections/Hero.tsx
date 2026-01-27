@@ -1,8 +1,16 @@
 import { motion } from 'framer-motion';
 import { ArrowUpRight, Database, Cpu, RotateCcw, Mic, Languages } from 'lucide-react';
 import { ChatCard } from '../ui/ChatCard';
+import { useNavigate } from 'react-router-dom';
 
 export const Hero = () => {
+    const navigate = useNavigate();
+
+    const handleGetStarted = () => {
+        const isLoggedIn = localStorage.getItem('opschat_username');
+        navigate(isLoggedIn ? '/dashboard' : '/auth');
+    };
+
     return (
         <section className="pt-44 pb-32 px-10 relative">
             <div className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none -z-10">
@@ -55,15 +63,18 @@ export const Hero = () => {
                         transition={{ delay: 0.5 }}
                         className="flex flex-wrap items-center gap-8"
                     >
-                        <button className="bg-slate-900 dark:bg-white text-white dark:text-slate-900 px-12 py-6 rounded-[24px] font-black text-xl hover:bg-black dark:hover:bg-slate-100 transition-all shadow-[0_20px_50px_rgba(0,0,0,0.1)] hover:-translate-y-1.5 active:translate-y-0">
+                        <button
+                            onClick={handleGetStarted}
+                            className="bg-slate-900 dark:bg-white text-white dark:text-slate-900 px-12 py-6 rounded-[24px] font-black text-xl hover:bg-black dark:hover:bg-slate-100 transition-all shadow-[0_20px_50px_rgba(0,0,0,0.1)] hover:-translate-y-1.5 active:translate-y-0"
+                        >
                             Go to Dashboard
                         </button>
-                        <button className="flex items-center gap-3 text-slate-900 dark:text-white font-black text-xl group relative">
+                        <a href="https://github.com/AdityaAryan-1408/OpsChat" target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 text-slate-900 dark:text-white font-black text-xl group relative">
                             GitHub Repo
                             <div className="w-10 h-10 rounded-full border-2 border-slate-900 dark:border-white flex items-center justify-center group-hover:bg-slate-900 dark:group-hover:bg-white group-hover:text-white dark:group-hover:text-slate-900 transition-all">
                                 <ArrowUpRight className="w-4 h-4" />
                             </div>
-                        </button>
+                        </a>
                     </motion.div>
 
                     <div className="mt-24 flex items-center gap-10">
@@ -80,7 +91,7 @@ export const Hero = () => {
                     </div>
                 </div>
 
-                
+
                 <div className="grid grid-cols-2 gap-8 relative lg:ml-16 xl:ml-24">
                     <ChatCard
                         name="Dev_Ops_Bot"
@@ -96,7 +107,6 @@ export const Hero = () => {
                         className="mt-20"
                     />
 
-                    {/* Infrastructure Icons */}
                     <div className="absolute -left-20 top-1/2 -translate-y-1/2 flex flex-col gap-8 z-20">
                         {[RotateCcw, Mic, Languages].map((Icon, i) => (
                             <motion.div

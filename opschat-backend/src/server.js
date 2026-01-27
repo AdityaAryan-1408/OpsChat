@@ -5,6 +5,8 @@ const cors = require('cors');
 const { PrismaClient } = require('@prisma/client');
 const { createClient } = require('redis');
 const { createAdapter } = require('@socket.io/redis-adapter');
+const { S3Client, CreateBucketCommand, PutObjectCommand } = require('@aws-sdk/client-s3');
+const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const bcrypt = require('bcryptjs');
 require('dotenv').config();
 
@@ -16,10 +18,34 @@ const prisma = new PrismaClient();
 const pubClient = createClient({ url: 'redis://localhost:6379' });
 const subClient = pubClient.duplicate();
 
+
+const s3Client = new S3Client({
+    region: "us-east-1",
+    endpoint: "http://127.0.0.1:9000",
+    forcePathStyle: true,
+    credentials: {
+        accessKeyId: "admin",
+        secretAccessKey: "password123"
+    }
+});
+
+
 async function startServer() {
 
     await Promise.all([pubClient.connect(), subClient.connect()]);
     console.log("Redis Connected");
+
+    // Initialize MinIO bucket
+    try {
+        await s3Client.send(new CreateBucketCommand({ Bucket: "opschat-uploads" }));
+        console.log("MinIO Bucket 'opschat-uploads' created");
+    } catch (err) {
+        if (err.name === 'BucketAlreadyOwnedByYou' || err.name === 'BucketAlreadyExists') {
+            console.log("MinIO Bucket 'opschat-uploads' already exists");
+        } else {
+            console.error("MinIO Bucket creation error:", err.message);
+        }
+    }
 
     const io = new Server(server, {
         cors: {
@@ -32,9 +58,49 @@ async function startServer() {
     app.use(cors());
     app.use(express.json());
 
+    app.post('/api/upload-url', async (req, res) => {
+        const { filename, fileType } = req.body;
+        if (!filename || !fileType) return res.status(400).json({ error: "Missing file info" });
 
+        const cleanFilename = filename.replace(/\s+/g, '-');
+        const uniqueKey = `${Date.now()}-${cleanFilename}`;
+
+        try {
+            const command = new PutObjectCommand({
+                Bucket: "opschat-uploads",
+                Key: uniqueKey,
+                ContentType: fileType,
+            });
+
+            const uploadUrl = await getSignedUrl(s3Client, command, { expiresIn: 60 });
+            const fileUrl = `http://localhost:9000/opschat-uploads/${uniqueKey}`;
+
+            res.json({ uploadUrl, fileUrl });
+        } catch (error) {
+            console.error("Presigned URL Error:", error);
+            res.status(500).json({ error: "Failed to generate upload URL" });
+        }
+    });
     app.get('/health', (req, res) => {
-        res.status(200).json({ status: 'ok' });
+        res.status(200).json({ status: 'ok', uptime: process.uptime() });
+    });
+
+    app.get('/ready', async (req, res) => {
+        try {
+            await prisma.$queryRaw`SELECT 1`;
+            await pubClient.ping();
+
+            res.status(200).json({
+                status: 'ready',
+                services: { database: 'up', redis: 'up' }
+            });
+        } catch (error) {
+            console.error("Readiness Check Failed:", error);
+            res.status(503).json({
+                status: 'not ready',
+                error: error.message
+            });
+        }
     });
 
     app.post('/api/check-username', async (req, res) => {
@@ -156,6 +222,7 @@ async function startServer() {
                         channelId: msg.channelId,
                         author: msg.author || msg.user?.username || "Unknown",
                         message: msg.content,
+                        type: msg.type || 'text',
                         time: new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                     })));
                 } else {
@@ -187,6 +254,7 @@ async function startServer() {
                     data: {
                         content: data.message,
                         author: data.author,
+                        type: data.type || 'text',
                         channelId: channel.id,
                         userId: data.userId ? parseInt(data.userId) : null,
                         expiresAt: expiresAt
@@ -214,6 +282,36 @@ async function startServer() {
     server.listen(port, () => {
         console.log(`Server is running on port ${port}`);
     });
+
+    const shutdown = async (signal) => {
+        console.log(`\n🛑 Received ${signal}. Shutting down gracefully...`);
+
+        setTimeout(() => {
+            console.error('   ⚠️  Shutdown timed out. Forcefully exiting.');
+            process.exit(1);
+        }, 5000);
+
+        server.close(async () => {
+            console.log('   ✅ Http server closed.');
+
+            try {
+                if (pubClient.isOpen) await pubClient.disconnect();
+                if (subClient.isOpen) await subClient.disconnect();
+                console.log('   ✅ Redis connections closed.');
+
+                await prisma.$disconnect();
+                console.log('   ✅ Database connection closed.');
+
+                console.log('👋 Goodbye!');
+                process.exit(0);
+            } catch (err) {
+                console.error('   ❌ Error during shutdown:', err);
+                process.exit(1);
+            }
+        });
+    };
+    process.on('SIGTERM', () => shutdown('SIGTERM'));
+    process.on('SIGINT', () => shutdown('SIGINT'));
 }
 
 startServer();

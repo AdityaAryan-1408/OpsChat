@@ -1,8 +1,16 @@
 import { motion } from 'framer-motion';
 import { Zap, ArrowUpRight } from 'lucide-react';
 import { ThemeToggle } from '../ui/ThemeToggle';
+import { useNavigate } from 'react-router-dom';
 
 export const Navbar = () => {
+    const navigate = useNavigate();
+
+    const handleGetStarted = () => {
+        const isLoggedIn = localStorage.getItem('opschat_username');
+        navigate(isLoggedIn ? '/dashboard' : '/auth');
+    };
+
     return (
         <motion.nav
             initial={{ y: -20, opacity: 0 }}
@@ -10,7 +18,7 @@ export const Navbar = () => {
             className="fixed top-0 left-0 right-0 z-50 py-6 px-10 flex items-center justify-between pointer-events-none md:pointer-events-auto"
         >
             <div className="flex items-center gap-8 pointer-events-auto">
-                <div className="flex items-center gap-2 group cursor-pointer">
+                <div className="flex items-center gap-2 group cursor-pointer" onClick={() => navigate('/')}>
                     <div className="w-9 h-9 bg-[#b5f2a1] rounded-xl flex items-center justify-center shadow-lg group-hover:rotate-12 transition-transform duration-300">
                         <Zap className="w-5 h-5 text-black fill-black" />
                     </div>
@@ -26,7 +34,10 @@ export const Navbar = () => {
             </div>
             <div className="flex items-center gap-4 pointer-events-auto">
                 <ThemeToggle />
-                <button className="bg-[#b5f2a1] text-black px-7 py-3 rounded-full font-black text-sm flex items-center gap-2 hover:bg-[#a2e08e] transition-all shadow-md hover:shadow-lg hover:-translate-y-0.5 active:translate-y-0">
+                <button
+                    onClick={handleGetStarted}
+                    className="bg-[#b5f2a1] text-black px-7 py-3 rounded-full font-black text-sm flex items-center gap-2 hover:bg-[#a2e08e] transition-all shadow-md hover:shadow-lg hover:-translate-y-0.5 active:translate-y-0"
+                >
                     Get Started <ArrowUpRight className="w-4 h-4" />
                 </button>
             </div>

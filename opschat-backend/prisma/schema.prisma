@@ -62,11 +62,12 @@ model Message {
   content   String
   author    String   // Keeping author name for quick UI access
   userId    Int?     // Optional link to User model
+  type      String   @default("text") // text, image, file
   
   // Link to Channel instead of raw string "room"
   channelId Int
   
-  // NEW: Self-Destruct Feature
+  // Self-Destruct Feature
   expiresAt DateTime? 
   
   createdAt DateTime @default(now())

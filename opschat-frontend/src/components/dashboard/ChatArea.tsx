@@ -23,6 +23,7 @@ interface Message {
     author: string;
     message: string;
     time: string;
+    type?: 'text' | 'image' | 'file';
 }
 
 
@@ -52,12 +53,14 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
     const [searchQuery, setSearchQuery] = useState('');
     const [requestStatus, setRequestStatus] = useState<'sending' | 'success' | null>(null);
     const [selectedLang, setSelectedLang] = useState('EN');
+    const [isUploading, setIsUploading] = useState(false);
 
 
     const [isRecording, setIsRecording] = useState(false);
     const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const chunksRef = useRef<Blob[]>([]);
+    const fileInputRef = useRef<HTMLInputElement>(null);
 
 
     const [expiryIndex, setExpiryIndex] = useState(0);
@@ -107,22 +110,54 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
     }, [messages]);
 
 
-    const handleSendMessage = async () => {
-        if (messageInput.trim() === "") return;
-
-
+    const handleSendMessage = (content: string, type: 'text' | 'image' | 'file' = 'text') => {
+        if (!content.trim()) return;
 
         const payload = {
-            message: messageInput,
+            message: content,
             author: username,
             channelName: activeView.id,
+            type: type,
             expiresIn: activeExpiry.value > 0 ? activeExpiry.value : null
         };
 
-        console.log("Sending:", payload);
         socket.emit("send_message", payload);
+        if (type === 'text') setMessageInput("");
+    };
 
-        setMessageInput("");
+    const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        setIsUploading(true);
+        try {
+            const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+
+            const res = await fetch(`${API_URL}/api/upload-url`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ filename: file.name, fileType: file.type })
+            });
+
+            if (!res.ok) throw new Error("Failed to get upload URL");
+            const { uploadUrl, fileUrl } = await res.json();
+
+            await fetch(uploadUrl, {
+                method: 'PUT',
+                body: file,
+                headers: { 'Content-Type': file.type }
+            });
+
+            const type = file.type.startsWith('image/') ? 'image' : 'file';
+            handleSendMessage(fileUrl, type);
+
+        } catch (error) {
+            console.error("Upload error:", error);
+            alert("Failed to upload file");
+        } finally {
+            setIsUploading(false);
+            if (fileInputRef.current) fileInputRef.current.value = '';
+        }
     };
 
 
@@ -302,9 +337,28 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                                                 ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-tr-none'
                                                 : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-tl-none border border-slate-100 dark:border-slate-700'
                                                 } p-4 rounded-2xl inline-block max-w-xl shadow-sm`}>
-                                                <p className="text-sm leading-relaxed">
-                                                    {msg.message}
-                                                </p>
+                                                {msg.type === 'image' ? (
+                                                    <img
+                                                        src={msg.message}
+                                                        alt="Uploaded image"
+                                                        className="max-w-full rounded-lg max-h-80 object-contain cursor-pointer hover:opacity-90 transition-opacity"
+                                                        onClick={() => window.open(msg.message, '_blank')}
+                                                    />
+                                                ) : msg.type === 'file' ? (
+                                                    <a
+                                                        href={msg.message}
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                        className="flex items-center gap-2 text-blue-500 hover:text-blue-600 underline"
+                                                    >
+                                                        <Paperclip className="w-4 h-4" />
+                                                        {msg.message.split('/').pop()}
+                                                    </a>
+                                                ) : (
+                                                    <p className="text-sm leading-relaxed">
+                                                        {msg.message}
+                                                    </p>
+                                                )}
                                             </div>
                                         </div>
                                     </div>
@@ -355,14 +409,24 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                                         <div className="absolute left-4 top-1/2 -translate-y-1/2 flex items-center gap-3 text-slate-300 dark:text-slate-600">
                                             <Plus className="w-5 h-5 cursor-pointer hover:text-slate-900 dark:hover:text-white transition-colors" />
                                             <div className="h-5 w-px bg-slate-100 dark:bg-slate-700" />
-                                            <Paperclip className="w-5 h-5 cursor-pointer hover:text-slate-900 dark:hover:text-white transition-colors" />
+                                            <Paperclip
+                                                onClick={() => fileInputRef.current?.click()}
+                                                className="w-5 h-5 cursor-pointer hover:text-slate-900 dark:hover:text-white transition-colors"
+                                            />
+                                            <input
+                                                type="file"
+                                                ref={fileInputRef}
+                                                onChange={handleFileSelect}
+                                                className="hidden"
+                                                accept="image/*,.pdf,.doc,.docx,.txt"
+                                            />
                                         </div>
 
                                         <input
                                             type="text"
                                             value={messageInput}
                                             onChange={(e) => setMessageInput(e.target.value)}
-                                            onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
+                                            onKeyDown={(e) => e.key === 'Enter' && handleSendMessage(messageInput)}
                                             placeholder={`Message ${activeView.type === 'channel' ? '#' + activeView.id : activeView.id}...`}
                                             className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-3xl py-5 pl-24 pr-48 text-sm font-medium text-slate-900 dark:text-white focus:outline-none focus:border-[#b5f2a1] transition-all placeholder:text-slate-300 dark:placeholder:text-slate-600"
                                         />
@@ -393,7 +457,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                                             </button>
 
                                             <button
-                                                onClick={handleSendMessage}
+                                                onClick={() => handleSendMessage(messageInput)}
                                                 className="bg-slate-900 dark:bg-white text-white dark:text-slate-900 p-3 rounded-xl shadow-xl shadow-slate-200 dark:shadow-none hover:scale-105 active:scale-95 transition-all">
                                                 <Send className="w-4 h-4" />
                                             </button>

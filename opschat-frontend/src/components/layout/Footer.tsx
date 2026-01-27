@@ -1,6 +1,14 @@
 import { Zap, ArrowUpRight } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 
 export const Footer = () => {
+    const navigate = useNavigate();
+
+    const handleGetStarted = () => {
+        const isLoggedIn = localStorage.getItem('opschat_username');
+        navigate(isLoggedIn ? '/dashboard' : '/auth');
+    };
+
     return (
         <footer className="py-32 bg-white dark:bg-slate-900 px-10 border-t border-slate-100 dark:border-slate-800 transition-colors">
             <div className="max-w-7xl mx-auto">
@@ -15,12 +23,15 @@ export const Footer = () => {
                         <h2 className="text-5xl font-black text-slate-900 dark:text-white leading-[1] mb-12 tracking-tight">
                             The high-scale blueprint for your next mission-critical app.
                         </h2>
-                        <button className="bg-[#b5f2a1] text-black px-12 py-6 rounded-[24px] font-black text-xl flex items-center gap-3 hover:bg-[#a2e08e] transition-all shadow-xl shadow-[#b5f2a1]/20">
+                        <button
+                            onClick={handleGetStarted}
+                            className="bg-[#b5f2a1] text-black px-12 py-6 rounded-[24px] font-black text-xl flex items-center gap-3 hover:bg-[#a2e08e] transition-all shadow-xl shadow-[#b5f2a1]/20"
+                        >
                             Get Started <ArrowUpRight className="w-6 h-6" />
                         </button>
                     </div>
 
-                    
+
                 </div>
 
                 <div className="pt-16 border-t border-slate-100 dark:border-slate-800 flex flex-col md:flex-row justify-between items-center gap-10">
