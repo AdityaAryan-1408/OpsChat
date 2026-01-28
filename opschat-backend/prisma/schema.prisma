@@ -62,7 +62,7 @@ model Message {
   content   String
   author    String   // Keeping author name for quick UI access
   userId    Int?     // Optional link to User model
-  type      String   @default("text") // text, image, file
+  type      String   @default("text") // text, image, file, audio
   
   // Link to Channel instead of raw string "room"
   channelId Int

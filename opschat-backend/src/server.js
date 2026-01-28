@@ -8,11 +8,13 @@ const { createAdapter } = require('@socket.io/redis-adapter');
 const { S3Client, CreateBucketCommand, PutObjectCommand } = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const bcrypt = require('bcryptjs');
+const Groq = require('groq-sdk');
 require('dotenv').config();
 
 const app = express();
 const server = http.createServer(app);
 const prisma = new PrismaClient();
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
 
 const pubClient = createClient({ url: 'redis://localhost:6379' });
@@ -35,7 +37,6 @@ async function startServer() {
     await Promise.all([pubClient.connect(), subClient.connect()]);
     console.log("Redis Connected");
 
-    // Initialize MinIO bucket
     try {
         await s3Client.send(new CreateBucketCommand({ Bucket: "opschat-uploads" }));
         console.log("MinIO Bucket 'opschat-uploads' created");
@@ -182,6 +183,66 @@ async function startServer() {
         } catch (error) {
             console.error("Login error:", error);
             res.status(500).json({ error: "Internal server error" });
+        }
+    });
+
+    app.post('/api/ai/summarize', async (req, res) => {
+        const { messages } = req.body;
+        if (!messages || !Array.isArray(messages)) return res.status(400).json({ error: "Invalid messages" });
+
+        try {
+            const context = messages.join("\n");
+
+            const completion = await groq.chat.completions.create({
+                messages: [
+                    {
+                        role: "system",
+                        content: "You are a helpful project manager assistant. Summarize the following chat conversation into 2-3 concise sentences. Focus on key decisions and action items."
+                    },
+                    {
+                        role: "user",
+                        content: context
+                    }
+                ],
+                model: "llama-3.3-70b-versatile",
+                temperature: 0.5,
+            });
+
+            const summary = completion.choices[0]?.message?.content || "Could not generate summary.";
+            res.json({ summary });
+
+        } catch (error) {
+            console.error("Groq API Error:", error);
+            res.status(500).json({ error: "AI service failed" });
+        }
+    });
+
+    app.post('/api/ai/translate', async (req, res) => {
+        const { text, lang } = req.body;
+        if (!text || !lang) return res.status(400).json({ error: "Missing parameters" });
+
+        try {
+            const completion = await groq.chat.completions.create({
+                messages: [
+                    {
+                        role: "system",
+                        content: `You are a professional translator. Translate the following text into ${lang}. Output ONLY the translated text, no explanations.`
+                    },
+                    {
+                        role: "user",
+                        content: text
+                    }
+                ],
+                model: "llama-3.1-8b-instant",
+                temperature: 0.3,
+            });
+
+            const translation = completion.choices[0]?.message?.content || text;
+            res.json({ translation });
+
+        } catch (error) {
+            console.error("Groq API Error:", error);
+            res.status(500).json({ error: "Translation failed" });
         }
     });
 

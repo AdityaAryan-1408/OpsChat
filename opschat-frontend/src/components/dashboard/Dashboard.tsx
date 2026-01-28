@@ -37,12 +37,14 @@ export const Dashboard = () => {
 
     useEffect(() => {
         const saved = localStorage.getItem('userProfile');
-        if (saved) {
+        const email = localStorage.getItem('opschat_email');
+
+        if (saved && email) {
             setUserProfile(JSON.parse(saved));
         } else {
-            // navigate('/auth'); 
+            navigate('/auth');
         }
-    }, []);
+    }, [navigate]);
 
 
     useEffect(() => {
@@ -71,7 +73,10 @@ export const Dashboard = () => {
 
     const handleLogout = () => {
         localStorage.removeItem('userProfile');
-        navigate('/');
+        localStorage.removeItem('opschat_username');
+        localStorage.removeItem('opschat_email');
+        localStorage.removeItem('userAvatar');
+        navigate('/auth');
     };
 
     return (

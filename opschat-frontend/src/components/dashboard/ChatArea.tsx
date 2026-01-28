@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
     Plus, MessageSquare, UserPlus, Hash, User, Activity, Bell, Info,
     MoreVertical, Sparkles, Mic, Send, Paperclip, Check, ChevronRight,
-    Terminal, Globe, X, Square, Command, Clock
+    Terminal, Globe, X, Square, Command, Clock, Languages
 } from 'lucide-react';
 import { InputField } from '../ui/InputField';
 import type { ViewState } from '../../types';
@@ -23,7 +23,7 @@ interface Message {
     author: string;
     message: string;
     time: string;
-    type?: 'text' | 'image' | 'file';
+    type?: 'text' | 'image' | 'file' | 'audio';
 }
 
 
@@ -50,6 +50,10 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
 
 
     const [isSummarizing, setIsSummarizing] = useState(false);
+    const [summaryText, setSummaryText] = useState('');
+    const [summaryLoading, setSummaryLoading] = useState(false);
+    const [translatedMessages, setTranslatedMessages] = useState<Record<number, string>>({});
+    const [translatingId, setTranslatingId] = useState<number | null>(null);
     const [searchQuery, setSearchQuery] = useState('');
     const [requestStatus, setRequestStatus] = useState<'sending' | 'success' | null>(null);
     const [selectedLang, setSelectedLang] = useState('EN');
@@ -110,7 +114,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
     }, [messages]);
 
 
-    const handleSendMessage = (content: string, type: 'text' | 'image' | 'file' = 'text') => {
+    const handleSendMessage = (content: string, type: 'text' | 'image' | 'file' | 'audio' = 'text') => {
         if (!content.trim()) return;
 
         const payload = {
@@ -171,10 +175,11 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                 if (e.data.size > 0) chunksRef.current.push(e.data);
             };
 
-            mediaRecorderRef.current.onstop = () => {
+            mediaRecorderRef.current.onstop = async () => {
                 const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
                 setAudioBlob(blob);
                 stream.getTracks().forEach(track => track.stop());
+                await handleAudioUpload(blob);
             };
 
             mediaRecorderRef.current.start();
@@ -195,13 +200,114 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
     const cancelRecording = () => {
         if (mediaRecorderRef.current && isRecording) {
             mediaRecorderRef.current.stop();
+            chunksRef.current = [];
             setIsRecording(false);
             setAudioBlob(null);
         }
     };
 
+    const handleAudioUpload = async (blob: Blob) => {
+        setIsUploading(true);
+        try {
+            const filename = `voice-note-${Date.now()}.webm`;
+            const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+
+            const res = await fetch(`${API_URL}/api/upload-url`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ filename, fileType: 'audio/webm' })
+            });
+
+            if (!res.ok) throw new Error("Failed to get upload URL");
+            const { uploadUrl, fileUrl } = await res.json();
+
+            await fetch(uploadUrl, {
+                method: 'PUT',
+                body: blob,
+                headers: { 'Content-Type': 'audio/webm' }
+            });
+
+            handleSendMessage(fileUrl, 'audio');
+
+        } catch (error) {
+            console.error("Audio upload failed:", error);
+            alert("Failed to send voice note");
+        } finally {
+            setIsUploading(false);
+        }
+    };
+
     const toggleExpiry = () => {
         setExpiryIndex((prev) => (prev + 1) % EXPIRY_OPTIONS.length);
+    };
+
+    const handleSummarize = async () => {
+        if (messages.length === 0) {
+            setSummaryText('No messages to summarize.');
+            setIsSummarizing(true);
+            return;
+        }
+
+        setIsSummarizing(true);
+        setSummaryLoading(true);
+        setSummaryText('');
+
+        try {
+            const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+            const messageTexts = messages.map(m => `${m.author}: ${m.message}`);
+
+            const res = await fetch(`${API_URL}/api/ai/summarize`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ messages: messageTexts })
+            });
+
+            if (!res.ok) throw new Error('Summarization failed');
+            const data = await res.json();
+            setSummaryText(data.summary);
+        } catch (error) {
+            console.error('Summarization error:', error);
+            setSummaryText('Failed to generate summary. Please try again.');
+        } finally {
+            setSummaryLoading(false);
+        }
+    };
+
+    const handleTranslate = async (messageIndex: number, text: string) => {
+        if (translatingId !== null) return; 
+
+        const langMap: Record<string, string> = {
+            'EN': 'English',
+            'ES': 'Spanish',
+            'FR': 'French',
+            'DE': 'German',
+            'HI': 'Hindi',
+            'JA': 'Japanese',
+            'ZH': 'Chinese'
+        };
+
+        setTranslatingId(messageIndex);
+
+        try {
+            const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+            const res = await fetch(`${API_URL}/api/ai/translate`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text, lang: langMap[selectedLang] || selectedLang })
+            });
+
+            if (!res.ok) throw new Error('Translation failed');
+            const data = await res.json();
+
+            setTranslatedMessages(prev => ({
+                ...prev,
+                [messageIndex]: data.translation
+            }));
+        } catch (error) {
+            console.error('Translation error:', error);
+        } finally {
+            setTranslatingId(null);
+        }
     };
 
     const handleSendRequest = () => {
@@ -228,7 +334,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                         exit={{ opacity: 0, scale: 1.05 }}
                         className="flex-1 flex flex-col items-center justify-center p-12 text-center"
                     >
-                        {/* Empty State UI */}
+
                         <div className="w-32 h-32 bg-[#b5f2a1]/10 rounded-full flex items-center justify-center mb-8 relative">
                             <motion.div
                                 animate={{ rotate: 360 }}
@@ -287,16 +393,20 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                                     </span>
                                 </div>
 
-                                <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-800 px-3 py-1.5 rounded-full border border-slate-100 dark:border-slate-700 cursor-pointer">
+                                <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-800 px-3 py-1.5 rounded-full border border-slate-100 dark:border-slate-700">
                                     <Globe className="w-3.5 h-3.5 text-slate-400" />
                                     <select
                                         value={selectedLang}
                                         onChange={(e) => setSelectedLang(e.target.value)}
-                                        className="bg-transparent text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest outline-none cursor-pointer appearance-none"
+                                        className="bg-transparent text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest outline-none cursor-pointer pr-2"
                                     >
-                                        <option value="EN">EN</option>
-                                        <option value="ES">ES</option>
-                                        <option value="FR">FR</option>
+                                        <option value="EN">EN - English</option>
+                                        <option value="ES">ES - Spanish</option>
+                                        <option value="FR">FR - French</option>
+                                        <option value="DE">DE - German</option>
+                                        <option value="HI">HI - Hindi</option>
+                                        <option value="JA">JA - Japanese</option>
+                                        <option value="ZH">ZH - Chinese</option>
                                     </select>
                                 </div>
 
@@ -336,28 +446,57 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                                             <div className={`${isMe
                                                 ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-tr-none'
                                                 : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-tl-none border border-slate-100 dark:border-slate-700'
-                                                } p-4 rounded-2xl inline-block max-w-xl shadow-sm`}>
+                                                } p-4 rounded-2xl inline-block max-w-xl shadow-sm overflow-hidden`}>
                                                 {msg.type === 'image' ? (
                                                     <img
                                                         src={msg.message}
-                                                        alt="Uploaded image"
+                                                        alt="Uploaded attachment"
                                                         className="max-w-full rounded-lg max-h-80 object-contain cursor-pointer hover:opacity-90 transition-opacity"
                                                         onClick={() => window.open(msg.message, '_blank')}
                                                     />
+                                                ) : msg.type === 'audio' ? (
+
+                                                    <div className="flex items-center gap-2 min-w-[200px] text-slate-900 dark:text-slate-900">
+                                                        <audio controls src={msg.message} className="w-full h-8" />
+                                                    </div>
                                                 ) : msg.type === 'file' ? (
                                                     <a
                                                         href={msg.message}
                                                         target="_blank"
                                                         rel="noopener noreferrer"
-                                                        className="flex items-center gap-2 text-blue-500 hover:text-blue-600 underline"
+                                                        className="flex items-center gap-2 underline break-all"
                                                     >
                                                         <Paperclip className="w-4 h-4" />
                                                         {msg.message.split('/').pop()}
                                                     </a>
                                                 ) : (
-                                                    <p className="text-sm leading-relaxed">
-                                                        {msg.message}
-                                                    </p>
+                                                    <div className="group/msg">
+                                                        <p className="text-sm leading-relaxed whitespace-pre-wrap">
+                                                            {msg.message}
+                                                        </p>
+                                                        {translatedMessages[index] && (
+                                                            <p className="text-xs text-slate-500 dark:text-slate-400 mt-2 pt-2 border-t border-slate-200 dark:border-slate-600 italic">
+                                                                🌐 {translatedMessages[index]}
+                                                            </p>
+                                                        )}
+                                                        <button
+                                                            onClick={() => handleTranslate(index, msg.message)}
+                                                            disabled={translatingId === index}
+                                                            className={`mt-2 flex items-center gap-1 text-[10px] font-bold text-slate-400 hover:text-[#b5f2a1] transition-colors ${translatingId === index ? 'opacity-50' : ''}`}
+                                                        >
+                                                            {translatingId === index ? (
+                                                                <>
+                                                                    <div className="w-3 h-3 border border-[#b5f2a1] border-t-transparent rounded-full animate-spin" />
+                                                                    Translating...
+                                                                </>
+                                                            ) : (
+                                                                <>
+                                                                    <Languages className="w-3 h-3" />
+                                                                    Translate to {selectedLang}
+                                                                </>
+                                                            )}
+                                                        </button>
+                                                    </div>
                                                 )}
                                             </div>
                                         </div>
@@ -369,11 +508,28 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                             {isSummarizing && (
                                 <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="bg-[#b5f2a1]/10 border border-[#b5f2a1]/20 rounded-3xl p-6 relative overflow-hidden mx-auto max-w-2xl">
                                     <h4 className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-widest mb-3 flex items-center gap-2">
-                                        <Command className="w-3.5 h-3.5" /> Context Summary
+                                        <Command className="w-3.5 h-3.5" /> AI Summary
                                     </h4>
-                                    <p className="text-sm text-slate-700 dark:text-slate-300 leading-relaxed italic">
-                                        Systems are fully operational. No anomalies detected in current communication flow.
-                                    </p>
+                                    {summaryLoading ? (
+                                        <div className="flex items-center gap-2 text-slate-500">
+                                            <div className="w-4 h-4 border-2 border-[#b5f2a1] border-t-transparent rounded-full animate-spin" />
+                                            <span className="text-sm">Analyzing conversation...</span>
+                                        </div>
+                                    ) : summaryText ? (
+                                        <p className="text-sm text-slate-700 dark:text-slate-300 leading-relaxed">
+                                            {summaryText}
+                                        </p>
+                                    ) : (
+                                        <p className="text-sm text-slate-500 italic">
+                                            Click the sparkles button to summarize the chat.
+                                        </p>
+                                    )}
+                                    <button
+                                        onClick={() => { setIsSummarizing(false); setSummaryText(''); }}
+                                        className="absolute top-4 right-4 text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                                    >
+                                        <X className="w-4 h-4" />
+                                    </button>
                                 </motion.div>
                             )}
                         </div>
@@ -446,8 +602,10 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                                             </div>
 
                                             <button
-                                                onClick={() => setIsSummarizing(!isSummarizing)}
-                                                className={`p-2 rounded-xl transition-all ${isSummarizing ? 'bg-slate-900 dark:bg-white text-[#b5f2a1] dark:text-slate-900' : 'bg-slate-100 dark:bg-slate-700 text-slate-400 dark:text-slate-500 hover:text-slate-900 dark:hover:text-white'}`}
+                                                onClick={handleSummarize}
+                                                disabled={summaryLoading}
+                                                className={`p-2 rounded-xl transition-all ${isSummarizing ? 'bg-slate-900 dark:bg-white text-[#b5f2a1] dark:text-slate-900' : 'bg-slate-100 dark:bg-slate-700 text-slate-400 dark:text-slate-500 hover:text-slate-900 dark:hover:text-white'} ${summaryLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                                title="AI Summarize"
                                             >
                                                 <Sparkles className="w-5 h-5" />
                                             </button>

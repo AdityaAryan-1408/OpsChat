@@ -7,7 +7,7 @@ export const Hero = () => {
     const navigate = useNavigate();
 
     const handleGetStarted = () => {
-        const isLoggedIn = localStorage.getItem('opschat_username');
+        const isLoggedIn = localStorage.getItem('opschat_email');
         navigate(isLoggedIn ? '/dashboard' : '/auth');
     };
 
