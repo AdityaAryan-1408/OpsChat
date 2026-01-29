@@ -49,7 +49,7 @@ export const Benefits = () => {
                             title="GitOps CD"
                             icon={RotateCcw}
                             className="mt-16 md:mt-24"
-                            description="Continuous delivery via ArgoCD ensures new versions are deployed automatically from your ECR image store."
+                            description="Continuous delivery via GitHub Actions ensures new versions are deployed automatically from your container registry."
                         />
                         <BenefitCard
                             subtitle="security"

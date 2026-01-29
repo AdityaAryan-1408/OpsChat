@@ -9,7 +9,7 @@ export const OrbitFeatures = () => {
 
             <div className="max-w-7xl mx-auto px-10 flex flex-col items-center text-center">
                 <div className="relative w-80 h-80 md:w-[500px] md:h-[500px] mb-32">
-                    
+
                     <div className="absolute inset-0 border-2 border-slate-200 dark:border-slate-600 rounded-full" />
                     <div className="absolute inset-16 border-2 border-slate-200 dark:border-slate-600 rounded-full" />
                     <div className="absolute inset-32 border-2 border-slate-200 dark:border-slate-600 rounded-full" />
@@ -38,11 +38,11 @@ export const OrbitFeatures = () => {
                 <motion.div initial="hidden" whileInView="visible" viewport={{ once: true }} variants={popUpSpring}>
                     <h2 className="text-7xl font-black text-slate-900 dark:text-white mb-10 tracking-tighter">Unified Infrastructure.</h2>
                     <p className="text-slate-400 dark:text-slate-500 max-w-2xl text-2xl mb-16 font-medium leading-relaxed">
-                        Provisioned via Terraform. Deployed via GitOps. <br />OpsChat is the blueprint for modern enterprise collaboration.
+                        Containerized via Docker. Deployed via GitOps. <br />OpsChat is the blueprint for modern enterprise collaboration.
                     </p>
                     <div className="flex flex-col sm:flex-row gap-6 justify-center">
-                        <button className="bg-slate-900 dark:bg-white text-white dark:text-slate-900 px-12 py-6 rounded-[24px] font-black text-xl hover:bg-black dark:hover:bg-slate-100 transition-all shadow-2xl">Start LocalStack Sim</button>
-                        <button className="bg-white dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-700 text-slate-900 dark:text-white px-12 py-6 rounded-[24px] font-black text-xl hover:bg-slate-50 dark:hover:bg-slate-700 transition-all">Terraform Specs</button>
+                        <button className="bg-slate-900 dark:bg-white text-white dark:text-slate-900 px-12 py-6 rounded-[24px] font-black text-xl hover:bg-black dark:hover:bg-slate-100 transition-all shadow-2xl">Start MinIO Storage</button>
+                        <button className="bg-white dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-700 text-slate-900 dark:text-white px-12 py-6 rounded-[24px] font-black text-xl hover:bg-slate-50 dark:hover:bg-slate-700 transition-all">Docker Compose</button>
                     </div>
                 </motion.div>
             </div>
