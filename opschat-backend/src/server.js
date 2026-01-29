@@ -11,11 +11,16 @@ const prisma = require('./config/database');
 const { pubClient, subClient, connectRedis } = require('./config/redis');
 const { initializeBucket } = require('./config/s3');
 
-// Route imports
-const authRoutes = require('./routes/authRoutes');
-const uploadRoutes = require('./routes/uploadRoutes');
-const aiRoutes = require('./routes/aiRoutes');
-const healthRoutes = require('./routes/healthRoutes');
+// Route imports - Using the index.js barrel file
+const {
+    authRoutes,
+    uploadRoutes,
+    aiRoutes,
+    healthRoutes,
+    friendRoutes,
+    channelRoutes,
+    userRoutes
+} = require('./routes');
 
 // Socket handlers
 const setupSocketHandlers = require('./socket/handlers');
@@ -48,6 +53,9 @@ async function startServer() {
     app.use('/api', authRoutes);
     app.use('/api', uploadRoutes);
     app.use('/api/ai', aiRoutes);
+    app.use('/api/friends', friendRoutes);
+    app.use('/api/channels', channelRoutes);
+    app.use('/api/users', userRoutes); 
     app.use('/', healthRoutes);
 
     // Socket handlers

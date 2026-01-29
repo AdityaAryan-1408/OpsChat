@@ -8,26 +8,42 @@ datasource db {
 }
 
 model User {
-  id        Int       @id @default(autoincrement())
-  email     String    @unique
-  password  String
-  username  String?   @unique
-  name      String?
-  createdAt DateTime  @default(now())
-  
-  // Relations
+  id               Int             @id @default(autoincrement())
+  email            String          @unique
+  password         String
+  username         String?         @unique
+  name             String?
+  avatar           String?
+  bio              String?
+  createdAt        DateTime        @default(now())
+
   messages         Message[]
   workspaceMembers WorkspaceMember[]
+  
+  sentRequests     FriendRequest[] @relation("SentRequests")
+  receivedRequests FriendRequest[] @relation("ReceivedRequests")
+}
+
+model FriendRequest {
+  id         Int      @id @default(autoincrement())
+  senderId   Int
+  receiverId Int
+  status     String   @default("PENDING") 
+  createdAt  DateTime @default(now())
+
+  sender     User     @relation("SentRequests", fields: [senderId], references: [id])
+  receiver   User     @relation("ReceivedRequests", fields: [receiverId], references: [id])
+
+  @@unique([senderId, receiverId])
 }
 
 model Workspace {
-  id        Int       @id @default(autoincrement())
+  id        Int               @id @default(autoincrement())
   name      String
-  slug      String    @unique // e.g., "ops-team"
+  slug      String            @unique
   ownerId   Int
-  createdAt DateTime  @default(now())
+  createdAt DateTime          @default(now())
 
-  // Relations
   channels  Channel[]
   members   WorkspaceMember[]
 }
@@ -36,42 +52,38 @@ model WorkspaceMember {
   id          Int       @id @default(autoincrement())
   userId      Int
   workspaceId Int
-  role        String    @default("MEMBER") // ADMIN, MEMBER
+  role        String    @default("MEMBER")
   joinedAt    DateTime  @default(now())
 
   user        User      @relation(fields: [userId], references: [id])
   workspace   Workspace @relation(fields: [workspaceId], references: [id])
 
-  @@unique([userId, workspaceId]) // User can't join the same workspace twice
+  @@unique([userId, workspaceId])
 }
 
 model Channel {
   id          Int       @id @default(autoincrement())
-  name        String    // e.g., "general"
+  name        String
   workspaceId Int
+  inviteCode  String    @unique @default(uuid())
   createdAt   DateTime  @default(now())
 
   workspace   Workspace @relation(fields: [workspaceId], references: [id])
   messages    Message[]
 
-  @@unique([workspaceId, name]) // No duplicate channel names in one workspace
+  @@unique([workspaceId, name])
 }
 
 model Message {
-  id        Int      @id @default(autoincrement())
+  id        Int       @id @default(autoincrement())
   content   String
-  author    String   // Keeping author name for quick UI access
-  userId    Int?     // Optional link to User model
-  type      String   @default("text") // text, image, file, audio
-  
-  // Link to Channel instead of raw string "room"
+  author    String
+  userId    Int?
+  type      String    @default("text")
   channelId Int
-  
-  // Self-Destruct Feature
-  expiresAt DateTime? 
-  
-  createdAt DateTime @default(now())
+  expiresAt DateTime?
+  createdAt DateTime  @default(now())
 
-  channel   Channel @relation(fields: [channelId], references: [id])
-  user      User?   @relation(fields: [userId], references: [id])
+  channel   Channel   @relation(fields: [channelId], references: [id])
+  user      User?     @relation(fields: [userId], references: [id])
 }
