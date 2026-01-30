@@ -4,21 +4,31 @@ const setupSocketHandlers = (io) => {
     io.on('connection', (socket) => {
         console.log(`User connected: ${socket.id}`);
 
-        // Join a channel
-        socket.on('join_channel', async ({ channelName, workspaceId = 1 }) => {
+        // Join a channel 
+        socket.on('join_channel', async ({ room, channelId }) => {
             try {
-                const channel = await prisma.channel.findFirst({
-                    where: {
-                        name: channelName,
-                        workspaceId: workspaceId
+                const rooms = [...socket.rooms];
+                rooms.forEach(r => {
+                    if (r !== socket.id) {
+                        socket.leave(r);
                     }
                 });
 
-                if (channel) {
-                    socket.join(channel.id.toString());
-                    console.log(`User ${socket.id} joined channel ID: ${channel.id}`);
+                if (channelId) {
+                    const channel = await prisma.channel.findUnique({
+                        where: { id: parseInt(channelId) }
+                    });
 
-                    // Load message history
+                    if (!channel) {
+                        socket.emit('error', 'Channel not found');
+                        return;
+                    }
+
+                    const roomName = `channel_${channel.id}`;
+                    socket.join(roomName);
+                    console.log(`User ${socket.id} joined room: ${roomName}`);
+
+                    // Load message history for this channel
                     const pastMessages = await prisma.message.findMany({
                         where: {
                             channelId: channel.id,
@@ -40,44 +50,62 @@ const setupSocketHandlers = (io) => {
                         type: msg.type || 'text',
                         time: new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                     })));
-                } else {
-                    socket.emit('error', 'Channel not found');
+                } else if (room) {
+                    socket.join(room);
+                    console.log(`User ${socket.id} joined room: ${room}`);
+                    socket.emit('load_history', []);
                 }
             } catch (error) {
                 console.error("Error joining channel:", error);
+                socket.emit('error', 'Failed to join channel');
             }
         });
 
-        // Send a message
+        // Send a message 
         socket.on('send_message', async (data) => {
             try {
-                const channel = await prisma.channel.findFirst({
-                    where: { name: data.channelName, workspaceId: 1 }
+                const { message, author, channelId, type, expiresIn } = data;
+
+                if (!channelId) {
+                    console.error("No channelId provided for message");
+                    return;
+                }
+
+                const channel = await prisma.channel.findUnique({
+                    where: { id: parseInt(channelId) }
                 });
 
-                if (!channel) return;
+                if (!channel) {
+                    console.error(`Channel ${channelId} not found`);
+                    return;
+                }
 
                 // Calculate expiration time
                 let expiresAt = null;
-                if (data.expiresIn) {
-                    expiresAt = new Date(Date.now() + data.expiresIn * 1000);
+                if (expiresIn) {
+                    expiresAt = new Date(Date.now() + expiresIn * 1000);
                 }
 
                 // Save to database
                 const savedMessage = await prisma.message.create({
                     data: {
-                        content: data.message,
-                        author: data.author,
-                        type: data.type || 'text',
+                        content: message,
+                        author: author,
+                        type: type || 'text',
                         channelId: channel.id,
                         userId: data.userId ? parseInt(data.userId) : null,
                         expiresAt: expiresAt
                     }
                 });
 
-                // Broadcast to channel
-                io.to(channel.id.toString()).emit('receive_message', {
-                    ...data,
+                const roomName = `channel_${channel.id}`;
+
+                // Broadcast to channel room
+                io.to(roomName).emit('receive_message', {
+                    id: savedMessage.id.toString(),
+                    message: message,
+                    author: author,
+                    type: type || 'text',
                     channelId: channel.id,
                     time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                 });

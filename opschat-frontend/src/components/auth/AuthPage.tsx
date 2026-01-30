@@ -18,7 +18,7 @@ export const AuthPage = () => {
     const navigate = useNavigate();
 
     const handleAuth = async () => {
-        
+
         if (!email || !password) {
             setError("Please fill in all fields");
             return;
@@ -46,11 +46,13 @@ export const AuthPage = () => {
 
             if (response.ok) {
                 if (mode === 'signup') {
-                    
+                    // Store userId from signup response
+                    localStorage.setItem('userId', data.userId.toString());
                     localStorage.setItem('opschat_email', email);
                     navigate('/setup');
                 } else {
-                    
+                    // Store userId from login response
+                    localStorage.setItem('userId', data.user.id.toString());
                     localStorage.setItem('opschat_email', data.user.email);
 
                     if (data.isProfileSetup) {
@@ -74,7 +76,7 @@ export const AuthPage = () => {
 
     return (
         <div className="min-h-screen bg-[#f8f9fb] dark:bg-slate-900 font-sans selection:bg-[#b5f2a1] overflow-hidden flex flex-col relative transition-colors">
-            
+
             <div className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none -z-10">
                 <motion.div
                     animate={{ scale: [1, 1.2, 1], rotate: [0, 90, 0] }}
@@ -95,7 +97,7 @@ export const AuthPage = () => {
 
             <main className="flex-1 flex items-center justify-center px-6 pb-20">
                 <div className="max-w-6xl w-full grid grid-cols-1 lg:grid-cols-2 gap-20 items-center">
-                    
+
                     <motion.div initial="hidden" animate="visible" variants={staggerContainer} className="hidden lg:block space-y-12">
                         <div>
                             <motion.div variants={fadeInUp} className="inline-flex items-center gap-2 px-3 py-1 bg-[#b5f2a1]/10 border border-[#b5f2a1]/20 rounded-full mb-6">
@@ -121,11 +123,11 @@ export const AuthPage = () => {
                         </motion.div>
                     </motion.div>
 
-                   
+
                     <motion.div initial={{ opacity: 0, x: 40 }} animate={{ opacity: 1, x: 0 }} className="w-full max-w-md mx-auto">
                         <div className="bg-white dark:bg-slate-800 rounded-[40px] p-10 shadow-[0_32px_64px_-16px_rgba(0,0,0,0.05)] border border-slate-100 dark:border-slate-700">
 
-                            
+
                             <div className="flex gap-8 mb-10 border-b border-slate-50 dark:border-slate-700">
                                 <button onClick={() => { setMode('login'); setError(null); }} className={`pb-4 text-sm font-black uppercase tracking-widest relative ${mode === 'login' ? 'text-slate-900 dark:text-white' : 'text-slate-300 dark:text-slate-600'}`}>
                                     Login {mode === 'login' && <motion.div layoutId="tab" className="absolute bottom-0 left-0 right-0 h-1 bg-[#b5f2a1] rounded-full" />}
@@ -135,7 +137,7 @@ export const AuthPage = () => {
                                 </button>
                             </div>
 
-                            
+
                             <div className="space-y-6">
                                 <div className="space-y-4">
                                     <InputField
@@ -155,7 +157,7 @@ export const AuthPage = () => {
                                         onChange={(e) => setPassword(e.target.value)}
                                     />
 
-                                    
+
                                     <AnimatePresence>
                                         {mode === 'signup' && (
                                             <motion.div

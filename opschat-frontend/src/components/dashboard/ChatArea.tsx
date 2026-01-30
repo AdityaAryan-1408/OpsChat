@@ -6,14 +6,17 @@ import {
     Terminal, Globe, X, Square, Command, Clock, Languages
 } from 'lucide-react';
 import { InputField } from '../ui/InputField';
-import type { ViewState } from '../../types';
-import { socket } from '../../socket';
+import type { ViewState, Workspace } from '../../types';
+import { Socket } from 'socket.io-client'; 
+import axios from 'axios';
 
 interface ChatAreaProps {
     activeView: ViewState;
     showAddPerson: boolean;
     setShowAddPerson: (show: boolean) => void;
     socketConnected: boolean;
+    socket: Socket | null;
+    currentWorkspace: Workspace | null;
 }
 
 interface Message {
@@ -26,7 +29,6 @@ interface Message {
     type?: 'text' | 'image' | 'file' | 'audio';
 }
 
-
 const EXPIRY_OPTIONS = [
     { label: 'Off', value: 0, color: 'text-slate-400' },
     { label: '10s', value: 10, color: 'text-red-500' },
@@ -38,50 +40,68 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
     activeView,
     showAddPerson,
     setShowAddPerson,
-    socketConnected
+    socketConnected,
+    socket,
+    currentWorkspace
 }) => {
     const [messages, setMessages] = useState<Message[]>([]);
     const [messageInput, setMessageInput] = useState("");
 
-
+    // User Info
     const [username] = useState(() => localStorage.getItem("opschat_username") || "Guest");
+    const [userId] = useState(() => localStorage.getItem("opschat_userId") || null);
+
+    // Helper to get channel name from ID
+    const getChannelName = () => {
+        if (activeView.type === 'channel' && currentWorkspace) {
+            const channel = currentWorkspace.channels.find(c => c.id === activeView.id);
+            return channel?.name || `Channel ${activeView.id}`;
+        }
+        return activeView.id?.toString() || 'Unknown';
+    };
 
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
-
+    // AI & Translation State
     const [isSummarizing, setIsSummarizing] = useState(false);
     const [summaryText, setSummaryText] = useState('');
     const [summaryLoading, setSummaryLoading] = useState(false);
     const [translatedMessages, setTranslatedMessages] = useState<Record<number, string>>({});
     const [translatingId, setTranslatingId] = useState<number | null>(null);
-    const [searchQuery, setSearchQuery] = useState('');
-    const [requestStatus, setRequestStatus] = useState<'sending' | 'success' | null>(null);
     const [selectedLang, setSelectedLang] = useState('EN');
+
+    // Friend Request State
+    const [searchQuery, setSearchQuery] = useState('');
+    const [requestStatus, setRequestStatus] = useState<'sending' | 'success' | 'error' | null>(null);
+    const [requestMsg, setRequestMsg] = useState('');
+
+    // Media State
     const [isUploading, setIsUploading] = useState(false);
-
-
     const [isRecording, setIsRecording] = useState(false);
     const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const chunksRef = useRef<Blob[]>([]);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
-
     const [expiryIndex, setExpiryIndex] = useState(0);
     const activeExpiry = EXPIRY_OPTIONS[expiryIndex];
 
-
+    // 1. Join Channel / Room Logic
     useEffect(() => {
-        if (!activeView.id) return;
+        if (!activeView.id || !socket) return;
 
         console.log(`Joining channel: ${activeView.id}`);
-        setMessages([]);
+        setMessages([]); // Clear previous chat
 
-        if (!socket.connected) socket.connect();
+        // Determine room name. For channels, it's usually the ID.
+        // For DMs, it might be a composite string.
+        const roomName = activeView.type === 'channel'
+            ? `channel_${activeView.id}`
+            : `dm_${activeView.id}`;
 
         socket.emit("join_channel", {
-            channelName: activeView.id,
-            workspaceId: 1
+            room: roomName,
+            channelId: activeView.type === 'channel' ? activeView.id : undefined
         });
 
         const handleReceiveMessage = (data: Message) => {
@@ -95,7 +115,6 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
 
         const handleError = (err: string) => {
             console.error("Socket Error:", err);
-
         };
 
         socket.on("receive_message", handleReceiveMessage);
@@ -107,45 +126,49 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
             socket.off("load_history", handleLoadHistory);
             socket.off("error", handleError);
         }
-    }, [activeView.id]);
+    }, [activeView.id, socket]);
 
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }, [messages]);
 
 
+    // 2. Send Message Logic
     const handleSendMessage = (content: string, type: 'text' | 'image' | 'file' | 'audio' = 'text') => {
-        if (!content.trim()) return;
+        if (!content.trim() || !socket) return;
 
         const payload = {
             message: content,
-            author: username,
-            channelName: activeView.id,
+            author: username, 
+            channelId: activeView.type === 'channel' ? Number(activeView.id) : null,
+            receiverId: activeView.type === 'dm' ? activeView.id : null, // Assuming activeView.id is username for DM for now
             type: type,
             expiresIn: activeExpiry.value > 0 ? activeExpiry.value : null
         };
 
         socket.emit("send_message", payload);
+
         if (type === 'text') setMessageInput("");
     };
 
+    // 3. File Upload Logic (Presigned URL)
     const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
 
         setIsUploading(true);
         try {
-            const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
-
-            const res = await fetch(`${API_URL}/api/upload-url`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ filename: file.name, fileType: file.type })
+            const userId = localStorage.getItem('userId');
+            const res = await axios.post(`${import.meta.env.VITE_API_URL}/api/upload/url`, {
+                filename: file.name,
+                fileType: file.type
+            }, {
+                headers: { 'x-user-id': userId }
             });
 
-            if (!res.ok) throw new Error("Failed to get upload URL");
-            const { uploadUrl, fileUrl } = await res.json();
+            const { uploadUrl, fileUrl } = res.data;
 
+            // PUT to S3 directly
             await fetch(uploadUrl, {
                 method: 'PUT',
                 body: file,
@@ -164,7 +187,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
         }
     };
 
-
+    // 4. Voice Note Logic
     const startRecording = async () => {
         try {
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -210,16 +233,16 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
         setIsUploading(true);
         try {
             const filename = `voice-note-${Date.now()}.webm`;
-            const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+            const userId = localStorage.getItem('userId');
 
-            const res = await fetch(`${API_URL}/api/upload-url`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ filename, fileType: 'audio/webm' })
+            const res = await axios.post(`${import.meta.env.VITE_API_URL}/api/upload/url`, {
+                filename,
+                fileType: 'audio/webm'
+            }, {
+                headers: { 'x-user-id': userId }
             });
 
-            if (!res.ok) throw new Error("Failed to get upload URL");
-            const { uploadUrl, fileUrl } = await res.json();
+            const { uploadUrl, fileUrl } = res.data;
 
             await fetch(uploadUrl, {
                 method: 'PUT',
@@ -231,7 +254,6 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
 
         } catch (error) {
             console.error("Audio upload failed:", error);
-            alert("Failed to send voice note");
         } finally {
             setIsUploading(false);
         }
@@ -241,6 +263,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
         setExpiryIndex((prev) => (prev + 1) % EXPIRY_OPTIONS.length);
     };
 
+    // 5. AI Summarization Logic
     const handleSummarize = async () => {
         if (messages.length === 0) {
             setSummaryText('No messages to summarize.');
@@ -253,74 +276,81 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
         setSummaryText('');
 
         try {
-            const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+            const userId = localStorage.getItem('userId');
             const messageTexts = messages.map(m => `${m.author}: ${m.message}`);
 
-            const res = await fetch(`${API_URL}/api/ai/summarize`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ messages: messageTexts })
+            const res = await axios.post(`${import.meta.env.VITE_API_URL}/api/ai/summarize`, {
+                messages: messageTexts
+            }, {
+                headers: { 'x-user-id': userId }
             });
 
-            if (!res.ok) throw new Error('Summarization failed');
-            const data = await res.json();
-            setSummaryText(data.summary);
+            setSummaryText(res.data.summary);
         } catch (error) {
             console.error('Summarization error:', error);
-            setSummaryText('Failed to generate summary. Please try again.');
+            setSummaryText('Failed to generate summary.');
         } finally {
             setSummaryLoading(false);
         }
     };
 
+    // 6. Real Friend Request Logic
+    const handleSendRequest = async () => {
+        if (!searchQuery) return;
+        setRequestStatus('sending');
+        setRequestMsg('');
+
+        try {
+            const userId = localStorage.getItem('userId');
+            // NOTE: Currently expecting ID. In future, we will add username lookup.
+            // For now, assume the user might enter an ID or we need to handle this via Search.
+            await axios.post(`${import.meta.env.VITE_API_URL}/api/friends/send`, {
+                receiverId: searchQuery // Assuming ID for Phase 2 simplicity
+            }, {
+                headers: { 'x-user-id': userId }
+            });
+
+            setRequestStatus('success');
+            setTimeout(() => {
+                setShowAddPerson(false);
+                setRequestStatus(null);
+                setSearchQuery('');
+            }, 1500);
+        } catch (error: any) {
+            setRequestStatus('error');
+            setRequestMsg(error.response?.data?.error || 'Failed to send request');
+        }
+    };
+
+    // 7. Translation Logic
     const handleTranslate = async (messageIndex: number, text: string) => {
-        if (translatingId !== null) return; 
+        if (translatingId !== null) return;
 
         const langMap: Record<string, string> = {
-            'EN': 'English',
-            'ES': 'Spanish',
-            'FR': 'French',
-            'DE': 'German',
-            'HI': 'Hindi',
-            'JA': 'Japanese',
-            'ZH': 'Chinese'
+            'EN': 'English', 'ES': 'Spanish', 'FR': 'French',
+            'DE': 'German', 'HI': 'Hindi', 'JA': 'Japanese', 'ZH': 'Chinese'
         };
 
         setTranslatingId(messageIndex);
 
         try {
-            const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
-            const res = await fetch(`${API_URL}/api/ai/translate`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ text, lang: langMap[selectedLang] || selectedLang })
+            const userId = localStorage.getItem('userId');
+            const res = await axios.post(`${import.meta.env.VITE_API_URL}/api/ai/translate`, {
+                text,
+                lang: langMap[selectedLang] || selectedLang
+            }, {
+                headers: { 'x-user-id': userId }
             });
-
-            if (!res.ok) throw new Error('Translation failed');
-            const data = await res.json();
 
             setTranslatedMessages(prev => ({
                 ...prev,
-                [messageIndex]: data.translation
+                [messageIndex]: res.data.translation
             }));
         } catch (error) {
             console.error('Translation error:', error);
         } finally {
             setTranslatingId(null);
         }
-    };
-
-    const handleSendRequest = () => {
-        if (!searchQuery) return;
-        setRequestStatus('sending');
-        setTimeout(() => {
-            setRequestStatus('success');
-            setTimeout(() => {
-                setShowAddPerson(false);
-                setRequestStatus(null);
-                setSearchQuery('');
-            }, 1000);
-        }, 1500);
     };
 
     return (
@@ -334,7 +364,6 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                         exit={{ opacity: 0, scale: 1.05 }}
                         className="flex-1 flex flex-col items-center justify-center p-12 text-center"
                     >
-
                         <div className="w-32 h-32 bg-[#b5f2a1]/10 rounded-full flex items-center justify-center mb-8 relative">
                             <motion.div
                                 animate={{ rotate: 360 }}
@@ -377,7 +406,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                                 </div>
                                 <div>
                                     <h2 className="text-lg font-black text-slate-900 dark:text-white tracking-tight">
-                                        {activeView.type === 'channel' ? `#${activeView.id}` : activeView.id}
+                                        {activeView.type === 'channel' ? `#${getChannelName()}` : activeView.id}
                                     </h2>
                                     <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">
                                         {activeView.type === 'channel' ? 'Scalable Cluster Active' : 'Secure P2P Connection'}
@@ -385,7 +414,6 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                                 </div>
                             </div>
                             <div className="flex items-center gap-6">
-
                                 <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full border ${socketConnected ? 'bg-slate-50 dark:bg-slate-800 border-slate-100 dark:border-slate-700' : 'bg-red-50 border-red-100'}`}>
                                     <Activity className={`w-3.5 h-3.5 ${socketConnected ? 'text-green-500' : 'text-red-500'}`} />
                                     <span className="text-[9px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">
@@ -400,25 +428,16 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                                         onChange={(e) => setSelectedLang(e.target.value)}
                                         className="bg-transparent text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest outline-none cursor-pointer pr-2"
                                     >
-                                        <option value="EN">EN - English</option>
-                                        <option value="ES">ES - Spanish</option>
-                                        <option value="FR">FR - French</option>
-                                        <option value="DE">DE - German</option>
-                                        <option value="HI">HI - Hindi</option>
-                                        <option value="JA">JA - Japanese</option>
-                                        <option value="ZH">ZH - Chinese</option>
+                                        <option value="EN">EN</option>
+                                        <option value="ES">ES</option>
+                                        <option value="FR">FR</option>
+                                        <option value="DE">DE</option>
+                                        <option value="HI">HI</option>
+                                        <option value="ZH">ZH</option>
                                     </select>
-                                </div>
-
-                                <div className="h-6 w-px bg-slate-100 dark:bg-slate-700" />
-                                <div className="flex items-center gap-4 text-slate-400 dark:text-slate-500">
-                                    <Bell className="w-5 h-5 cursor-pointer hover:text-slate-900 dark:hover:text-white transition-colors" />
-                                    <Info className="w-5 h-5 cursor-pointer hover:text-slate-900 dark:hover:text-white transition-colors" />
-                                    <MoreVertical className="w-5 h-5 cursor-pointer hover:text-slate-900 dark:hover:text-white transition-colors" />
                                 </div>
                             </div>
                         </header>
-
 
                         <div className="flex-1 overflow-y-auto p-8 space-y-8 bg-[#fcfdfe] dark:bg-slate-900/50">
                             <div className="flex justify-center">
@@ -447,54 +466,36 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                                                 ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-tr-none'
                                                 : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-tl-none border border-slate-100 dark:border-slate-700'
                                                 } p-4 rounded-2xl inline-block max-w-xl shadow-sm overflow-hidden`}>
+
                                                 {msg.type === 'image' ? (
                                                     <img
                                                         src={msg.message}
-                                                        alt="Uploaded attachment"
-                                                        className="max-w-full rounded-lg max-h-80 object-contain cursor-pointer hover:opacity-90 transition-opacity"
+                                                        alt="Attachment"
+                                                        className="max-w-full rounded-lg max-h-80 object-contain cursor-pointer"
                                                         onClick={() => window.open(msg.message, '_blank')}
                                                     />
                                                 ) : msg.type === 'audio' ? (
-
-                                                    <div className="flex items-center gap-2 min-w-[200px] text-slate-900 dark:text-slate-900">
+                                                    <div className="flex items-center gap-2 min-w-[200px]">
                                                         <audio controls src={msg.message} className="w-full h-8" />
                                                     </div>
                                                 ) : msg.type === 'file' ? (
-                                                    <a
-                                                        href={msg.message}
-                                                        target="_blank"
-                                                        rel="noopener noreferrer"
-                                                        className="flex items-center gap-2 underline break-all"
-                                                    >
+                                                    <a href={msg.message} target="_blank" className="flex items-center gap-2 underline">
                                                         <Paperclip className="w-4 h-4" />
                                                         {msg.message.split('/').pop()}
                                                     </a>
                                                 ) : (
-                                                    <div className="group/msg">
-                                                        <p className="text-sm leading-relaxed whitespace-pre-wrap">
-                                                            {msg.message}
-                                                        </p>
+                                                    <div>
+                                                        <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.message}</p>
                                                         {translatedMessages[index] && (
-                                                            <p className="text-xs text-slate-500 dark:text-slate-400 mt-2 pt-2 border-t border-slate-200 dark:border-slate-600 italic">
+                                                            <p className="text-xs text-slate-500 mt-2 pt-2 border-t border-slate-200 dark:border-slate-600 italic">
                                                                 🌐 {translatedMessages[index]}
                                                             </p>
                                                         )}
                                                         <button
                                                             onClick={() => handleTranslate(index, msg.message)}
-                                                            disabled={translatingId === index}
-                                                            className={`mt-2 flex items-center gap-1 text-[10px] font-bold text-slate-400 hover:text-[#b5f2a1] transition-colors ${translatingId === index ? 'opacity-50' : ''}`}
+                                                            className="mt-2 text-[10px] font-bold text-slate-400 hover:text-[#b5f2a1] transition-colors flex items-center gap-1"
                                                         >
-                                                            {translatingId === index ? (
-                                                                <>
-                                                                    <div className="w-3 h-3 border border-[#b5f2a1] border-t-transparent rounded-full animate-spin" />
-                                                                    Translating...
-                                                                </>
-                                                            ) : (
-                                                                <>
-                                                                    <Languages className="w-3 h-3" />
-                                                                    Translate to {selectedLang}
-                                                                </>
-                                                            )}
+                                                            <Languages className="w-3 h-3" /> Translate
                                                         </button>
                                                     </div>
                                                 )}
@@ -511,71 +512,36 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                                         <Command className="w-3.5 h-3.5" /> AI Summary
                                     </h4>
                                     {summaryLoading ? (
-                                        <div className="flex items-center gap-2 text-slate-500">
-                                            <div className="w-4 h-4 border-2 border-[#b5f2a1] border-t-transparent rounded-full animate-spin" />
-                                            <span className="text-sm">Analyzing conversation...</span>
-                                        </div>
-                                    ) : summaryText ? (
-                                        <p className="text-sm text-slate-700 dark:text-slate-300 leading-relaxed">
-                                            {summaryText}
-                                        </p>
+                                        <span className="text-sm">Analyzing conversation...</span>
                                     ) : (
-                                        <p className="text-sm text-slate-500 italic">
-                                            Click the sparkles button to summarize the chat.
-                                        </p>
+                                        <p className="text-sm text-slate-700 dark:text-slate-300 leading-relaxed">{summaryText || "Failed to generate summary."}</p>
                                     )}
-                                    <button
-                                        onClick={() => { setIsSummarizing(false); setSummaryText(''); }}
-                                        className="absolute top-4 right-4 text-slate-400 hover:text-slate-900 dark:hover:text-white"
-                                    >
+                                    <button onClick={() => setIsSummarizing(false)} className="absolute top-4 right-4">
                                         <X className="w-4 h-4" />
                                     </button>
                                 </motion.div>
                             )}
                         </div>
 
-
                         <div className="flex-shrink-0 p-8 bg-white dark:bg-slate-900 border-t border-slate-50 dark:border-slate-800">
                             <div className="max-w-4xl mx-auto relative">
-
                                 {isRecording ? (
-                                    <div className="w-full bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-900/30 rounded-3xl py-4 px-6 flex items-center justify-between">
+                                    <div className="w-full bg-red-50 dark:bg-red-900/20 border border-red-100 rounded-3xl py-4 px-6 flex items-center justify-between">
                                         <div className="flex items-center gap-3">
                                             <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse" />
-                                            <span className="text-sm font-bold text-red-600 dark:text-red-400">Recording Audio...</span>
+                                            <span className="text-sm font-bold text-red-600">Recording...</span>
                                         </div>
-
-                                        <div className="flex items-center gap-2">
-                                            <button
-                                                onClick={cancelRecording}
-                                                className="p-2 hover:bg-red-100 dark:hover:bg-red-900/40 rounded-full text-slate-500 dark:text-slate-400 transition-colors"
-                                            >
-                                                <X className="w-5 h-5" />
-                                            </button>
-                                            <button
-                                                onClick={stopRecording}
-                                                className="bg-red-500 text-white px-4 py-2 rounded-xl text-xs font-bold hover:bg-red-600 transition-colors flex items-center gap-2"
-                                            >
-                                                <Square className="w-3 h-3 fill-current" /> Stop & Save
-                                            </button>
+                                        <div className="flex gap-2">
+                                            <button onClick={cancelRecording}><X className="w-5 h-5" /></button>
+                                            <button onClick={stopRecording}><Square className="w-3 h-3" /></button>
                                         </div>
                                     </div>
                                 ) : (
                                     <>
-                                        <div className="absolute left-4 top-1/2 -translate-y-1/2 flex items-center gap-3 text-slate-300 dark:text-slate-600">
-                                            <Plus className="w-5 h-5 cursor-pointer hover:text-slate-900 dark:hover:text-white transition-colors" />
-                                            <div className="h-5 w-px bg-slate-100 dark:bg-slate-700" />
-                                            <Paperclip
-                                                onClick={() => fileInputRef.current?.click()}
-                                                className="w-5 h-5 cursor-pointer hover:text-slate-900 dark:hover:text-white transition-colors"
-                                            />
-                                            <input
-                                                type="file"
-                                                ref={fileInputRef}
-                                                onChange={handleFileSelect}
-                                                className="hidden"
-                                                accept="image/*,.pdf,.doc,.docx,.txt"
-                                            />
+                                        <div className="absolute left-4 top-1/2 -translate-y-1/2 flex items-center gap-3 text-slate-300">
+                                            <Plus className="w-5 h-5 cursor-pointer" />
+                                            <Paperclip onClick={() => fileInputRef.current?.click()} className="w-5 h-5 cursor-pointer hover:text-slate-900 dark:hover:text-white" />
+                                            <input type="file" ref={fileInputRef} onChange={handleFileSelect} className="hidden" />
                                         </div>
 
                                         <input
@@ -583,40 +549,21 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                                             value={messageInput}
                                             onChange={(e) => setMessageInput(e.target.value)}
                                             onKeyDown={(e) => e.key === 'Enter' && handleSendMessage(messageInput)}
-                                            placeholder={`Message ${activeView.type === 'channel' ? '#' + activeView.id : activeView.id}...`}
-                                            className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-3xl py-5 pl-24 pr-48 text-sm font-medium text-slate-900 dark:text-white focus:outline-none focus:border-[#b5f2a1] transition-all placeholder:text-slate-300 dark:placeholder:text-slate-600"
+                                            placeholder={`Message #${getChannelName()}...`}
+                                            className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-3xl py-5 pl-24 pr-48 text-sm font-medium focus:outline-none focus:border-[#b5f2a1]"
                                         />
 
                                         <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-3">
-
-
-                                            <div className="flex items-center gap-1">
-                                                <button
-                                                    onClick={toggleExpiry}
-                                                    className={`p-2 rounded-xl transition-all flex items-center gap-1 ${activeExpiry.color} bg-slate-100 dark:bg-slate-700 hover:brightness-95`}
-                                                    title={`Self-destruct: ${activeExpiry.label}`}
-                                                >
-                                                    <Clock className="w-4 h-4" />
-                                                    {activeExpiry.value > 0 && <span className="text-[10px] font-black">{activeExpiry.label}</span>}
-                                                </button>
-                                            </div>
-
-                                            <button
-                                                onClick={handleSummarize}
-                                                disabled={summaryLoading}
-                                                className={`p-2 rounded-xl transition-all ${isSummarizing ? 'bg-slate-900 dark:bg-white text-[#b5f2a1] dark:text-slate-900' : 'bg-slate-100 dark:bg-slate-700 text-slate-400 dark:text-slate-500 hover:text-slate-900 dark:hover:text-white'} ${summaryLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
-                                                title="AI Summarize"
-                                            >
+                                            <button onClick={toggleExpiry} className={`p-2 rounded-xl ${activeExpiry.color} bg-slate-100 dark:bg-slate-700`}>
+                                                <Clock className="w-4 h-4" />
+                                            </button>
+                                            <button onClick={handleSummarize} className="p-2 bg-slate-100 dark:bg-slate-700 rounded-xl">
                                                 <Sparkles className="w-5 h-5" />
                                             </button>
-
                                             <button onClick={startRecording}>
-                                                <Mic className="w-5 h-5 text-slate-300 dark:text-slate-600 cursor-pointer hover:text-red-500 dark:hover:text-red-400 transition-colors" />
+                                                <Mic className="w-5 h-5 text-slate-300 hover:text-red-500" />
                                             </button>
-
-                                            <button
-                                                onClick={() => handleSendMessage(messageInput)}
-                                                className="bg-slate-900 dark:bg-white text-white dark:text-slate-900 p-3 rounded-xl shadow-xl shadow-slate-200 dark:shadow-none hover:scale-105 active:scale-95 transition-all">
+                                            <button onClick={() => handleSendMessage(messageInput)} className="bg-slate-900 dark:bg-white text-white dark:text-slate-900 p-3 rounded-xl shadow-xl">
                                                 <Send className="w-4 h-4" />
                                             </button>
                                         </div>
@@ -628,21 +575,13 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                 )}
             </AnimatePresence>
 
-
             <AnimatePresence>
                 {showAddPerson && (
-                    <div className="absolute inset-0 z-50 flex items-center justify-center p-6">
+                    <div className="absolute inset-0 z-50 flex items-center justify-center p-6 bg-slate-900/40 backdrop-blur-sm">
                         <motion.div
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            exit={{ opacity: 0 }}
-                            onClick={() => setShowAddPerson(false)}
-                            className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
-                        />
-                        <motion.div
-                            initial={{ opacity: 0, scale: 0.9, y: 20 }}
-                            animate={{ opacity: 1, scale: 1, y: 0 }}
-                            exit={{ opacity: 0, scale: 0.9, y: 20 }}
+                            initial={{ opacity: 0, scale: 0.9 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            exit={{ opacity: 0, scale: 0.9 }}
                             className="relative bg-white dark:bg-slate-800 rounded-[40px] p-10 w-full max-w-sm shadow-2xl border border-slate-100 dark:border-slate-700"
                         >
                             <h3 className="text-2xl font-black text-slate-900 dark:text-white mb-2 tracking-tighter">Request Contact</h3>
@@ -651,23 +590,26 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                             <div className="space-y-6">
                                 <InputField
                                     icon={Terminal}
-                                    label="Username"
-                                    placeholder="alex_devops"
+                                    label="User ID"
+                                    placeholder="Enter ID (e.g. 2)"
                                     value={searchQuery}
                                     onChange={(e) => setSearchQuery(e.target.value)}
                                 />
 
+                                {requestStatus === 'error' && (
+                                    <p className="text-xs text-red-500 font-bold">{requestMsg}</p>
+                                )}
+
                                 <button
                                     disabled={requestStatus === 'sending' || requestStatus === 'success'}
                                     onClick={handleSendRequest}
-                                    className="w-full bg-slate-900 dark:bg-white text-white dark:text-slate-900 py-4 rounded-2xl font-black text-sm hover:bg-black dark:hover:bg-slate-100 transition-all flex items-center justify-center gap-2 group disabled:opacity-50"
+                                    className="w-full bg-slate-900 dark:bg-white text-white dark:text-slate-900 py-4 rounded-2xl font-black text-sm hover:bg-black dark:hover:bg-slate-100 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
                                 >
                                     {requestStatus === 'sending' ? 'Connecting...' : requestStatus === 'success' ? 'Request Sent!' : 'Send Request'}
-                                    {requestStatus === null && <ChevronRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />}
                                     {requestStatus === 'success' && <Check className="w-4 h-4 text-[#b5f2a1]" />}
                                 </button>
 
-                                <button onClick={() => setShowAddPerson(false)} className="w-full text-xs font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest hover:text-slate-900 dark:hover:text-white transition-colors">Cancel</button>
+                                <button onClick={() => setShowAddPerson(false)} className="w-full text-xs font-black text-slate-400 uppercase tracking-widest hover:text-slate-900 transition-colors">Cancel</button>
                             </div>
                         </motion.div>
                     </div>

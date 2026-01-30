@@ -14,7 +14,8 @@ model User {
   username         String?         @unique
   name             String?
   avatar           String?
-  bio              String?
+  status           String?         // Short 1-line info (e.g. "DevOps Engineer")
+  bio              String?         // Longer bio up to 500 chars
   createdAt        DateTime        @default(now())
 
   messages         Message[]

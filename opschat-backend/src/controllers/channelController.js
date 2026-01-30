@@ -103,8 +103,63 @@ const getChannels = async (req, res) => {
     }
 };
 
+// Update a channel name
+const updateChannel = async (req, res) => {
+    try {
+        const { channelId } = req.params;
+        const { name } = req.body;
+
+        if (!name || name.trim().length === 0) {
+            return res.status(400).json({ error: "Channel name is required" });
+        }
+
+        const channel = await prisma.channel.update({
+            where: { id: parseInt(channelId) },
+            data: { name: name.trim().toLowerCase().replace(/\s+/g, '-') }
+        });
+
+        res.json(channel);
+    } catch (error) {
+        if (error.code === 'P2002') {
+            return res.status(400).json({ error: "Channel name already exists in this workspace" });
+        }
+        if (error.code === 'P2025') {
+            return res.status(404).json({ error: "Channel not found" });
+        }
+        console.error("Update Channel Error:", error);
+        res.status(500).json({ error: "Failed to update channel" });
+    }
+};
+
+// Delete a channel
+const deleteChannel = async (req, res) => {
+    try {
+        const { channelId } = req.params;
+
+        // First delete all messages in this channel
+        await prisma.message.deleteMany({
+            where: { channelId: parseInt(channelId) }
+        });
+
+        // Then delete the channel
+        await prisma.channel.delete({
+            where: { id: parseInt(channelId) }
+        });
+
+        res.json({ message: "Channel deleted successfully" });
+    } catch (error) {
+        if (error.code === 'P2025') {
+            return res.status(404).json({ error: "Channel not found" });
+        }
+        console.error("Delete Channel Error:", error);
+        res.status(500).json({ error: "Failed to delete channel" });
+    }
+};
+
 module.exports = {
     createChannel,
     joinChannel,
-    getChannels
+    getChannels,
+    updateChannel,
+    deleteChannel
 };

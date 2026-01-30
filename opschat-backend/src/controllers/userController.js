@@ -12,6 +12,7 @@ const getProfile = async (req, res) => {
                 username: true,
                 email: true,
                 name: true,
+                status: true,
                 bio: true,
                 avatar: true,
                 createdAt: true
@@ -33,9 +34,12 @@ const getProfile = async (req, res) => {
 const updateProfile = async (req, res) => {
     try {
         const userId = req.user.userId;
-        const { name, bio } = req.body;
+        const { name, status, bio } = req.body;
 
-        // Validation (Basic)
+        // Validation
+        if (status && status.length > 60) {
+            return res.status(400).json({ error: "Status must be less than 60 characters" });
+        }
         if (bio && bio.length > 500) {
             return res.status(400).json({ error: "Bio must be less than 500 characters" });
         }
@@ -44,12 +48,14 @@ const updateProfile = async (req, res) => {
             where: { id: userId },
             data: {
                 name,
+                status,
                 bio
             },
             select: {
                 id: true,
                 username: true,
                 name: true,
+                status: true,
                 bio: true,
                 avatar: true
             }
