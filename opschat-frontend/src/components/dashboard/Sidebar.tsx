@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-    Zap, Settings, ChevronRight, Plus, Hash, UserPlus, LogOut,
-    Key, MoreHorizontal 
+    Zap, Settings, Plus, Hash, UserPlus, LogOut,
+    Key, MoreHorizontal
 } from 'lucide-react';
 import { ThemeToggle } from '../ui/ThemeToggle';
 import type { User, Workspace, ViewState } from '../../types';
@@ -64,17 +64,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             </button>
                         </div>
                     </div>
-
-                    <div className="bg-slate-50 dark:bg-slate-700 rounded-2xl p-3 flex items-center gap-3 border border-slate-100 dark:border-slate-600 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-600 transition-colors">
-                        <div className="w-10 h-10 rounded-xl bg-slate-900 dark:bg-[#b5f2a1] flex items-center justify-center text-white dark:text-black font-bold">
-                            {currentWorkspace.name.charAt(0).toUpperCase()}
-                        </div>
-                        <div className="flex-1">
-                            <p className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">Workspace</p>
-                            <p className="text-xs font-bold text-slate-900 dark:text-white">{currentWorkspace.name}</p>
-                        </div>
-                        <ChevronRight className="w-4 h-4 text-slate-300 dark:text-slate-500" />
-                    </div>
                 </div>
 
                 <div className="flex-1 overflow-y-auto p-4 space-y-8">
@@ -127,10 +116,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         </div>
                     </div>
 
+                    {/* Add Person Section - Always visible */}
+                    <div>
+                        <div className="flex items-center justify-between px-2 mb-3">
+                            <p className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">Connections</p>
+                        </div>
+                        <button
+                            onClick={onAddPerson}
+                            className="w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-bold text-slate-400 dark:text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-700 hover:text-slate-600 dark:hover:text-slate-300 transition-all border border-dashed border-slate-200 dark:border-slate-700"
+                        >
+                            <UserPlus className="w-4 h-4" />
+                            <span>Send Friend Request</span>
+                        </button>
+                    </div>
+
+                    {/* Friends Section - Only show if there are friends */}
                     {directMessages.length > 0 && (
                         <div>
                             <div className="flex items-center justify-between px-2 mb-3">
-                                <p className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">Direct Messages</p>
+                                <p className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">Friends</p>
                                 <button
                                     onClick={onAddPerson}
                                     className="w-5 h-5 bg-slate-50 dark:bg-slate-700 rounded-md flex items-center justify-center text-slate-400 dark:text-slate-500 hover:bg-[#b5f2a1] hover:text-black transition-all"
@@ -141,23 +145,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             <div className="space-y-3">
                                 {directMessages.map(user => (
                                     <div
-                                        key={user.username}
-                                        onClick={() => setActiveView({ type: 'dm', id: user.username })}
-                                        className={`flex items-center gap-3 px-2 py-2 rounded-xl cursor-pointer group transition-all ${activeView.type === 'dm' && activeView.id === user.username
+                                        key={user.id}
+                                        onClick={() => setActiveView({ type: 'dm', id: user.id })}
+                                        className={`flex items-center gap-3 px-2 py-2 rounded-xl cursor-pointer group transition-all ${activeView.type === 'dm' && activeView.id === user.id
                                             ? 'bg-slate-50 dark:bg-slate-700'
                                             : 'hover:bg-slate-50/50 dark:hover:bg-slate-700/50'
                                             }`}
                                     >
                                         <div className="relative">
                                             <div className="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-600 flex items-center justify-center text-[10px] font-bold text-slate-400 dark:text-slate-300 group-hover:bg-[#b5f2a1] group-hover:text-black transition-colors">
-                                                {user.username.charAt(0).toUpperCase()}
+                                                {user.username?.charAt(0).toUpperCase() || 'U'}
                                             </div>
-                                            <div className={`absolute bottom-0 right-0 w-2 h-2 rounded-full border-2 border-white dark:border-slate-800 ${user.status === 'online' ? 'bg-green-500' : 'bg-slate-300 dark:bg-slate-500'
-                                                }`} />
+                                            <div className="absolute bottom-0 right-0 w-2 h-2 rounded-full border-2 border-white dark:border-slate-800 bg-green-500" />
                                         </div>
                                         <div>
-                                            <p className="text-xs font-bold text-slate-900 dark:text-white">{user.username}</p>
-                                            <p className="text-[8px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">{user.role}</p>
+                                            <p className="text-xs font-bold text-slate-900 dark:text-white">{user.name || user.username}</p>
+                                            <p className="text-[8px] font-bold text-green-500 uppercase tracking-widest truncate max-w-[100px]">{user.status || 'Friend'}</p>
                                         </div>
                                     </div>
                                 ))}

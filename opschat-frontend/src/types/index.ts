@@ -1,9 +1,12 @@
 export interface User {
-    id: string;
+    id: string | number;
     username: string;
+    name?: string;
+    status?: string; 
+    bio?: string;
+    avatar?: string;
     avatarUrl?: string;
-    status: 'online' | 'offline' | 'busy';
-    role?: string; 
+    role?: string;
 }
 
 export interface Message {
@@ -11,7 +14,7 @@ export interface Message {
     content: string;
     senderId: string;
     senderName: string;
-    createdAt: string; // ISO date string
+    createdAt: string; 
     channelId: string;
     type: 'text' | 'image' | 'voice' | 'system';
 }
@@ -31,5 +34,5 @@ export interface Workspace {
 
 export type ViewState = {
     type: 'channel' | 'dm' | null;
-    id: string | null;
+    id: string | number | null;
 };

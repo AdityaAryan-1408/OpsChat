@@ -45,6 +45,9 @@ async function startServer() {
         adapter: createAdapter(pubClient, subClient)
     });
 
+    // Make io accessible in routes
+    app.set('io', io);
+
     // Middleware
     app.use(cors());
     app.use(express.json());
@@ -55,7 +58,7 @@ async function startServer() {
     app.use('/api/ai', aiRoutes);
     app.use('/api/friends', friendRoutes);
     app.use('/api/channels', channelRoutes);
-    app.use('/api/users', userRoutes); 
+    app.use('/api/users', userRoutes);
     app.use('/', healthRoutes);
 
     // Socket handlers

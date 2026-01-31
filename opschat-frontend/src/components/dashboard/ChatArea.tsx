@@ -1,14 +1,15 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-    Plus, MessageSquare, UserPlus, Hash, User, Activity, Bell, Info,
+    Plus, MessageSquare, UserPlus, Hash, User as UserIcon, Activity, Bell, Info,
     MoreVertical, Sparkles, Mic, Send, Paperclip, Check, ChevronRight,
     Terminal, Globe, X, Square, Command, Clock, Languages
 } from 'lucide-react';
 import { InputField } from '../ui/InputField';
-import type { ViewState, Workspace } from '../../types';
-import { Socket } from 'socket.io-client'; 
+import type { ViewState, Workspace, User as UserType } from '../../types';
+import { Socket } from 'socket.io-client';
 import axios from 'axios';
+import ViewProfileModal from '../profile/ViewProfileModal';
 
 interface ChatAreaProps {
     activeView: ViewState;
@@ -17,13 +18,16 @@ interface ChatAreaProps {
     socketConnected: boolean;
     socket: Socket | null;
     currentWorkspace: Workspace | null;
+    friends?: UserType[];
 }
 
 interface Message {
     id: string;
     channelId?: number;
+    receiverId?: number;
     room?: string;
     author: string;
+    userId?: number | string;
     message: string;
     time: string;
     type?: 'text' | 'image' | 'file' | 'audio';
@@ -42,7 +46,8 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
     setShowAddPerson,
     socketConnected,
     socket,
-    currentWorkspace
+    currentWorkspace,
+    friends = []
 }) => {
     const [messages, setMessages] = useState<Message[]>([]);
     const [messageInput, setMessageInput] = useState("");
@@ -60,6 +65,15 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
         return activeView.id?.toString() || 'Unknown';
     };
 
+    // Helper to get DM friend name from ID
+    const getDmName = () => {
+        if (activeView.type === 'dm' && friends.length > 0) {
+            const friend = friends.find(f => f.id === activeView.id || f.id === Number(activeView.id));
+            return friend?.name || friend?.username || `User ${activeView.id}`;
+        }
+        return `User ${activeView.id}`;
+    };
+
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
     // AI & Translation State
@@ -69,11 +83,37 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
     const [translatedMessages, setTranslatedMessages] = useState<Record<number, string>>({});
     const [translatingId, setTranslatingId] = useState<number | null>(null);
     const [selectedLang, setSelectedLang] = useState('EN');
+    const [suggestions, setSuggestions] = useState<string[]>([]);
+    const [suggestionsLoading, setSuggestionsLoading] = useState(false);
 
-    // Friend Request State
+    // Fetch Smart Replies when new message arrives
+    useEffect(() => {
+        if (messages.length === 0) return;
+        const lastMsg = messages[messages.length - 1];
+
+        // Only suggest if last message is NOT from me
+        if (lastMsg.author !== username && !lastMsg.type?.startsWith('image')) {
+            setSuggestionsLoading(true);
+            const context = messages.slice(-5).map(m => `${m.author}: ${m.message}`);
+
+            axios.post(`${import.meta.env.VITE_API_URL}/api/ai/suggest-replies`, { context })
+                .then(res => {
+                    setSuggestions(res.data.suggestions || []);
+                })
+                .catch(err => console.error(err))
+                .finally(() => setSuggestionsLoading(false));
+        } else {
+            setSuggestions([]);
+        }
+    }, [messages, username]);
+
     const [searchQuery, setSearchQuery] = useState('');
     const [requestStatus, setRequestStatus] = useState<'sending' | 'success' | 'error' | null>(null);
     const [requestMsg, setRequestMsg] = useState('');
+
+    // View Profile Modal State
+    const [showProfileModal, setShowProfileModal] = useState(false);
+    const [viewingUserId, setViewingUserId] = useState<string | number | null>(null);
 
     // Media State
     const [isUploading, setIsUploading] = useState(false);
@@ -90,26 +130,50 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
     useEffect(() => {
         if (!activeView.id || !socket) return;
 
-        console.log(`Joining channel: ${activeView.id}`);
+        console.log(`Joining ${activeView.type}: ${activeView.id}`);
         setMessages([]); // Clear previous chat
+        setSuggestions([]); // Clear previous suggestions
 
-        // Determine room name. For channels, it's usually the ID.
-        // For DMs, it might be a composite string.
-        const roomName = activeView.type === 'channel'
-            ? `channel_${activeView.id}`
-            : `dm_${activeView.id}`;
+        const currentUserId = localStorage.getItem('userId');
 
-        socket.emit("join_channel", {
-            room: roomName,
-            channelId: activeView.type === 'channel' ? activeView.id : undefined
-        });
+        if (activeView.type === 'channel') {
+            // Join channel room
+            socket.emit("join_channel", {
+                channelId: activeView.id,
+                userId: currentUserId
+            });
+        } else if (activeView.type === 'dm') {
+            // Join DM room (between current user and friend)
+            socket.emit("join_channel", {
+                dmUserId: activeView.id,
+                userId: currentUserId
+            });
+        }
 
         const handleReceiveMessage = (data: Message) => {
-            setMessages((prev) => [...prev, data]);
+            // Filter messages to only show ones for current view
+            if (activeView.type === 'channel' && data.channelId === activeView.id) {
+                setMessages((prev) => [...prev, data]);
+            } else if (activeView.type === 'dm' && data.receiverId) {
+                // For DMs, check if this message belongs to this conversation
+                const myId = parseInt(currentUserId || '0');
+                const otherId = Number(activeView.id);
+                const senderId = data.userId;
+                const receiverId = data.receiverId;
+
+                // Message belongs to this DM if it's between these two users
+                if ((senderId === myId && receiverId === otherId) ||
+                    (senderId === otherId && receiverId === myId)) {
+                    setMessages((prev) => [...prev, data]);
+                }
+            } else if (activeView.type === 'dm' && !data.channelId) {
+                // Fallback for DM without receiverId in message
+                setMessages((prev) => [...prev, data]);
+            }
         };
 
         const handleLoadHistory = (history: Message[]) => {
-            console.log("History loaded:", history.length);
+            console.log(`History loaded for ${activeView.type} ${activeView.id}:`, history.length);
             setMessages(history);
         };
 
@@ -126,7 +190,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
             socket.off("load_history", handleLoadHistory);
             socket.off("error", handleError);
         }
-    }, [activeView.id, socket]);
+    }, [activeView.id, activeView.type, socket]); // Added activeView.type to dependencies
 
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -137,11 +201,14 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
     const handleSendMessage = (content: string, type: 'text' | 'image' | 'file' | 'audio' = 'text') => {
         if (!content.trim() || !socket) return;
 
+        const currentUserId = localStorage.getItem('userId');
+
         const payload = {
             message: content,
-            author: username, 
+            author: username,
+            userId: currentUserId ? parseInt(currentUserId) : null,
             channelId: activeView.type === 'channel' ? Number(activeView.id) : null,
-            receiverId: activeView.type === 'dm' ? activeView.id : null, // Assuming activeView.id is username for DM for now
+            receiverId: activeView.type === 'dm' ? Number(activeView.id) : null,
             type: type,
             expiresIn: activeExpiry.value > 0 ? activeExpiry.value : null
         };
@@ -159,7 +226,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
         setIsUploading(true);
         try {
             const userId = localStorage.getItem('userId');
-            const res = await axios.post(`${import.meta.env.VITE_API_URL}/api/upload/url`, {
+            const res = await axios.post(`${import.meta.env.VITE_API_URL}/api/upload-url`, {
                 filename: file.name,
                 fileType: file.type
             }, {
@@ -178,9 +245,11 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
             const type = file.type.startsWith('image/') ? 'image' : 'file';
             handleSendMessage(fileUrl, type);
 
-        } catch (error) {
+        } catch (error: any) {
             console.error("Upload error:", error);
-            alert("Failed to upload file");
+            console.error("URL called:", `${import.meta.env.VITE_API_URL}/api/upload-url`);
+            console.error("Response:", error.response?.status, error.response?.data);
+            alert("Failed to upload file: " + (error.response?.data?.error || error.message));
         } finally {
             setIsUploading(false);
             if (fileInputRef.current) fileInputRef.current.value = '';
@@ -235,7 +304,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
             const filename = `voice-note-${Date.now()}.webm`;
             const userId = localStorage.getItem('userId');
 
-            const res = await axios.post(`${import.meta.env.VITE_API_URL}/api/upload/url`, {
+            const res = await axios.post(`${import.meta.env.VITE_API_URL}/api/upload-url`, {
                 filename,
                 fileType: 'audio/webm'
             }, {
@@ -296,16 +365,14 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
 
     // 6. Real Friend Request Logic
     const handleSendRequest = async () => {
-        if (!searchQuery) return;
+        if (!searchQuery.trim()) return;
         setRequestStatus('sending');
         setRequestMsg('');
 
         try {
             const userId = localStorage.getItem('userId');
-            // NOTE: Currently expecting ID. In future, we will add username lookup.
-            // For now, assume the user might enter an ID or we need to handle this via Search.
             await axios.post(`${import.meta.env.VITE_API_URL}/api/friends/send`, {
-                receiverId: searchQuery // Assuming ID for Phase 2 simplicity
+                receiverUsername: searchQuery.trim() // Send username instead of ID
             }, {
                 headers: { 'x-user-id': userId }
             });
@@ -402,11 +469,11 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                         <header className="h-20 flex-shrink-0 border-b border-slate-50 dark:border-slate-800 px-8 flex items-center justify-between bg-white/80 dark:bg-slate-900/80 backdrop-blur-md z-10">
                             <div className="flex items-center gap-4">
                                 <div className="w-10 h-10 rounded-xl bg-slate-50 dark:bg-slate-800 flex items-center justify-center text-slate-400 dark:text-slate-500">
-                                    {activeView.type === 'channel' ? <Hash className="w-5 h-5" /> : <User className="w-5 h-5" />}
+                                    {activeView.type === 'channel' ? <Hash className="w-5 h-5" /> : <UserIcon className="w-5 h-5" />}
                                 </div>
                                 <div>
                                     <h2 className="text-lg font-black text-slate-900 dark:text-white tracking-tight">
-                                        {activeView.type === 'channel' ? `#${getChannelName()}` : activeView.id}
+                                        {activeView.type === 'channel' ? `#${getChannelName()}` : getDmName()}
                                     </h2>
                                     <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">
                                         {activeView.type === 'channel' ? 'Scalable Cluster Active' : 'Secure P2P Connection'}
@@ -443,23 +510,39 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                             <div className="flex justify-center">
                                 <div className="bg-slate-900 dark:bg-slate-700 text-white px-4 py-2 rounded-full flex items-center gap-3 text-[10px] font-bold tracking-tight shadow-xl">
                                     <Sparkles className="w-3.5 h-3.5 text-[#b5f2a1]" />
-                                    Connection established in #{activeView.id}.
+                                    {activeView.type === 'channel'
+                                        ? `Connection established in #${getChannelName()}.`
+                                        : `Chatting with ${getDmName()}`
+                                    }
                                 </div>
                             </div>
 
                             {messages.map((msg, index) => {
                                 const isMe = msg.author === username;
+                                const handleViewProfile = () => {
+                                    if (!isMe && msg.userId) {
+                                        setViewingUserId(msg.userId);
+                                        setShowProfileModal(true);
+                                    }
+                                };
                                 return (
                                     <div key={index} className={`flex gap-4 ${isMe ? 'flex-row-reverse' : ''}`}>
-                                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold ${isMe
-                                            ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900'
-                                            : 'bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300'
-                                            }`}>
+                                        <div
+                                            onClick={handleViewProfile}
+                                            className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold ${isMe
+                                                ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900'
+                                                : 'bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300 cursor-pointer hover:ring-2 hover:ring-[#b5f2a1]'
+                                                }`}>
                                             {isMe ? 'ME' : msg.author.substring(0, 2).toUpperCase()}
                                         </div>
                                         <div className={`flex-1 space-y-2 ${isMe ? 'flex flex-col items-end' : ''}`}>
                                             <div className="flex items-center gap-2">
-                                                <span className="text-xs font-black text-slate-900 dark:text-white">{msg.author}</span>
+                                                <span
+                                                    onClick={handleViewProfile}
+                                                    className={`text-xs font-black text-slate-900 dark:text-white ${!isMe && msg.userId ? 'cursor-pointer hover:text-[#b5f2a1]' : ''}`}
+                                                >
+                                                    {msg.author}
+                                                </span>
                                                 <span className="text-[9px] font-bold text-slate-300 dark:text-slate-600">{msg.time}</span>
                                             </div>
                                             <div className={`${isMe
@@ -525,6 +608,32 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
 
                         <div className="flex-shrink-0 p-8 bg-white dark:bg-slate-900 border-t border-slate-50 dark:border-slate-800">
                             <div className="max-w-4xl mx-auto relative">
+
+                                {/* Smart Replies */}
+                                {!isRecording && (suggestions.length > 0 || suggestionsLoading) && (
+                                    <div className="absolute -top-14 left-0 flex gap-2 animate-in fade-in slide-in-from-bottom-2 z-10">
+                                        {suggestionsLoading && (
+                                            <div className="bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-full flex items-center gap-2">
+                                                <Sparkles className="w-3 h-3 text-[#b5f2a1] animate-spin" />
+                                                <span className="text-[10px] text-slate-400">Thinking...</span>
+                                            </div>
+                                        )}
+                                        {suggestions.map((s, i) => (
+                                            <button
+                                                key={i}
+                                                onClick={() => {
+                                                    setMessageInput(s);
+                                                    setSuggestions([]);
+                                                }}
+                                                className="bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700 shadow-sm hover:border-[#b5f2a1] hover:bg-[#b5f2a1]/10 text-slate-600 dark:text-slate-300 px-4 py-2 rounded-full text-xs font-medium transition-all flex items-center gap-2"
+                                            >
+                                                <Sparkles className="w-3 h-3 text-[#b5f2a1]" />
+                                                {s}
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+
                                 {isRecording ? (
                                     <div className="w-full bg-red-50 dark:bg-red-900/20 border border-red-100 rounded-3xl py-4 px-6 flex items-center justify-between">
                                         <div className="flex items-center gap-3">
@@ -539,7 +648,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                                 ) : (
                                     <>
                                         <div className="absolute left-4 top-1/2 -translate-y-1/2 flex items-center gap-3 text-slate-300">
-                                            <Plus className="w-5 h-5 cursor-pointer" />
+
                                             <Paperclip onClick={() => fileInputRef.current?.click()} className="w-5 h-5 cursor-pointer hover:text-slate-900 dark:hover:text-white" />
                                             <input type="file" ref={fileInputRef} onChange={handleFileSelect} className="hidden" />
                                         </div>
@@ -549,8 +658,8 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                                             value={messageInput}
                                             onChange={(e) => setMessageInput(e.target.value)}
                                             onKeyDown={(e) => e.key === 'Enter' && handleSendMessage(messageInput)}
-                                            placeholder={`Message #${getChannelName()}...`}
-                                            className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-3xl py-5 pl-24 pr-48 text-sm font-medium focus:outline-none focus:border-[#b5f2a1]"
+                                            placeholder={activeView.type === 'channel' ? `Message #${getChannelName()}...` : `Message ${getDmName()}...`}
+                                            className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-3xl py-5 pl-14 pr-48 text-sm font-medium text-slate-900 dark:text-white focus:outline-none focus:border-[#b5f2a1]"
                                         />
 
                                         <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-3">
@@ -590,8 +699,8 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                             <div className="space-y-6">
                                 <InputField
                                     icon={Terminal}
-                                    label="User ID"
-                                    placeholder="Enter ID (e.g. 2)"
+                                    label="USERNAME"
+                                    placeholder="Enter username (e.g. john_doe)"
                                     value={searchQuery}
                                     onChange={(e) => setSearchQuery(e.target.value)}
                                 />
@@ -615,6 +724,16 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                     </div>
                 )}
             </AnimatePresence>
+
+            {/* View Profile Modal */}
+            <ViewProfileModal
+                isOpen={showProfileModal}
+                onClose={() => {
+                    setShowProfileModal(false);
+                    setViewingUserId(null);
+                }}
+                userId={viewingUserId}
+            />
         </main>
     );
 };

@@ -18,11 +18,16 @@ model User {
   bio              String?         // Longer bio up to 500 chars
   createdAt        DateTime        @default(now())
 
-  messages         Message[]
-  workspaceMembers WorkspaceMember[]
+  messages            Message[]
+  workspaceMembers    WorkspaceMember[]
+  createdChannels     Channel[]         @relation("CreatedChannels")
+  channelMemberships  ChannelMember[]
   
   sentRequests     FriendRequest[] @relation("SentRequests")
   receivedRequests FriendRequest[] @relation("ReceivedRequests")
+  
+  sentDMs          DirectMessage[] @relation("SentDMs")
+  receivedDMs      DirectMessage[] @relation("ReceivedDMs")
 }
 
 model FriendRequest {
@@ -63,16 +68,32 @@ model WorkspaceMember {
 }
 
 model Channel {
-  id          Int       @id @default(autoincrement())
+  id          Int             @id @default(autoincrement())
   name        String
   workspaceId Int
-  inviteCode  String    @unique @default(uuid())
-  createdAt   DateTime  @default(now())
+  creatorId   Int
+  inviteCode  String          @unique @default(uuid())
+  createdAt   DateTime        @default(now())
 
-  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+  workspace   Workspace       @relation(fields: [workspaceId], references: [id])
+  creator     User            @relation("CreatedChannels", fields: [creatorId], references: [id])
   messages    Message[]
+  members     ChannelMember[]
 
   @@unique([workspaceId, name])
+}
+
+model ChannelMember {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  channelId Int
+  role      String   @default("MEMBER") // CREATOR, ADMIN, MEMBER
+  joinedAt  DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id])
+  channel   Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, channelId])
 }
 
 model Message {
@@ -85,6 +106,18 @@ model Message {
   expiresAt DateTime?
   createdAt DateTime  @default(now())
 
-  channel   Channel   @relation(fields: [channelId], references: [id])
+  channel   Channel   @relation(fields: [channelId], references: [id], onDelete: Cascade)
   user      User?     @relation(fields: [userId], references: [id])
+}
+
+model DirectMessage {
+  id         Int      @id @default(autoincrement())
+  content    String
+  type       String   @default("text")
+  senderId   Int
+  receiverId Int
+  createdAt  DateTime @default(now())
+
+  sender     User     @relation("SentDMs", fields: [senderId], references: [id])
+  receiver   User     @relation("ReceivedDMs", fields: [receiverId], references: [id])
 }

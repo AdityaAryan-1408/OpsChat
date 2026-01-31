@@ -68,7 +68,36 @@ const updateProfile = async (req, res) => {
     }
 };
 
+// Get any user's public profile by ID
+const getUserById = async (req, res) => {
+    try {
+        const { userId } = req.params;
+
+        const user = await prisma.user.findUnique({
+            where: { id: parseInt(userId) },
+            select: {
+                id: true,
+                username: true,
+                name: true,
+                status: true,
+                bio: true,
+                avatar: true
+            }
+        });
+
+        if (!user) {
+            return res.status(404).json({ error: "User not found" });
+        }
+
+        res.json(user);
+    } catch (error) {
+        console.error("Get User By ID Error:", error);
+        res.status(500).json({ error: "Failed to fetch user profile" });
+    }
+};
+
 module.exports = {
     getProfile,
-    updateProfile
+    updateProfile,
+    getUserById
 };

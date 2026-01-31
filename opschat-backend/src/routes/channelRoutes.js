@@ -9,6 +9,8 @@ router.post('/join', authenticateToken, channelController.joinChannel);
 
 router.get('/:workspaceId', authenticateToken, channelController.getChannels);
 
+router.get('/:channelId/invite-code', authenticateToken, channelController.getInviteCode);
+
 router.put('/:channelId', authenticateToken, channelController.updateChannel);
 
 router.delete('/:channelId', authenticateToken, channelController.deleteChannel);

@@ -11,4 +11,8 @@ router.get('/profile', authenticateToken, userController.getProfile);
 // PUT /api/users/profile
 router.put('/profile', authenticateToken, userController.updateProfile);
 
+// Get any user's public profile by ID
+// GET /api/users/:userId
+router.get('/:userId', authenticateToken, userController.getUserById);
+
 module.exports = router;
