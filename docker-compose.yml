@@ -1,6 +1,7 @@
 version: '3.8'
 
 services:
+  # 1. Database (PostgreSQL)
   postgres:
     image: postgres:15-alpine
     container_name: opschat_db
@@ -12,11 +13,20 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d opschat"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 2. Cache & PubSub (Redis)
   redis:
     image: redis:alpine
     container_name: opschat_redis
     ports:
       - "6379:6379"
+
+  # 3. Object Storage (MinIO)
 
   minio:
     image: minio/minio
@@ -31,6 +41,62 @@ services:
     volumes:
       - minio_data:/data
 
+
+  # 4. Backend API
+  backend:
+    build: ./opschat-backend
+    container_name: opschat_api
+    ports:
+      - "3000:3000"
+    environment:
+      # Database Connection (Using container name 'opschat_db')
+      DATABASE_URL: postgres://admin:password123@opschat_db:5432/opschat
+      
+      # Redis Connection (Using container name 'opschat_redis')
+      REDIS_HOST: opschat_redis
+      REDIS_PORT: 6379
+      
+      # MinIO Config (Using container name 'opschat_storage')
+      S3_ENDPOINT: http://opschat_storage
+      S3_PORT: 9000
+      S3_ACCESS_KEY: admin
+      S3_SECRET_KEY: password123
+      S3_BUCKET: opschat-uploads
+      S3_USE_SSL: "false"
+      
+      # App Config
+      PORT: 3000
+      # IMPORTANT: In browser, localhost refers to your machine. 
+      # Inside Docker, services talk via container names.
+      # Since the browser (Frontend) calls the API, CLIENT_URL stays localhost for dev.
+      CLIENT_URL: http://localhost 
+      JWT_SECRET: dev_secret_key_123
+      
+      # AI Config (Pass from host .env)
+      GROQ_API_KEY: ${GROQ_API_KEY}
+      
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      minio:
+        condition: service_started
+
+  # 5. Frontend UI
+  frontend:
+    build: 
+      context: ./opschat-frontend
+      args:
+        VITE_API_URL: ${VITE_API_URL} 
+    container_name: opschat_ui
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+
+
+# Persistent Volumes
 volumes:
   postgres_data:
   minio_data:
