@@ -33,7 +33,7 @@ export const AuthPage = () => {
         setError(null);
 
         const endpoint = mode === 'login' ? '/api/login' : '/api/signup';
-        const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+        const API_URL = import.meta.env.VITE_API_URL || "";
 
         try {
             const response = await fetch(`${API_URL}${endpoint}`, {

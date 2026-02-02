@@ -31,7 +31,7 @@ export const ProfileSetup = () => {
         { id: 6, color: 'bg-[#b5f2a1]' },
     ];
 
-    const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+    const API_URL = import.meta.env.VITE_API_URL || "";
 
     const handleContinue = async () => {
         setUsernameError(null);

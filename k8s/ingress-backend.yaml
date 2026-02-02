@@ -1,0 +1,30 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: opschat-ingress-api
+  annotations:
+
+    nginx.ingress.kubernetes.io/affinity: "cookie"
+    nginx.ingress.kubernetes.io/session-cookie-name: "route"
+    nginx.ingress.kubernetes.io/session-cookie-hash: "sha1"
+spec:
+  ingressClassName: nginx
+  rules:
+    - http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: opschat-api
+                port:
+                  number: 80
+          
+
+          - path: /socket.io
+            pathType: Prefix
+            backend:
+              service:
+                name: opschat-api
+                port:
+                  number: 80
