@@ -39,7 +39,10 @@ async function startServer() {
     // Setup Socket.io with Redis adapter
     const io = new Server(server, {
         cors: {
-            origin: process.env.CLIENT_URL || 'http://localhost:5173',
+            origin: [
+                process.env.CLIENT_URL || 'http://localhost:5173',
+                'http://localhost:8080'
+            ],
             methods: ["GET", "POST"]
         },
         adapter: createAdapter(pubClient, subClient)
@@ -48,8 +51,36 @@ async function startServer() {
     // Make io accessible in routes
     app.set('io', io);
 
+    // CORS Configuration - Allow both local dev and container environments
+    const allowedOrigins = [
+        process.env.CLIENT_URL || 'http://localhost:5173',
+        'http://localhost:8080',
+        'http://localhost',
+        'http://127.0.0.1',
+        'http://localhost:80'
+    ];
+    
     // Middleware
-    app.use(cors());
+    app.use(cors({
+        origin: function (origin, callback) {
+            // Allow requests with no origin (like mobile apps, curl, etc.)
+            if (!origin) return callback(null, true);
+            
+            // Allow any localhost/127.0.0.1 origin
+            if (origin.includes('localhost') || origin.includes('127.0.0.1')) {
+                return callback(null, true);
+            }
+            
+            if (allowedOrigins.indexOf(origin) !== -1) {
+                return callback(null, true);
+            }
+            
+            return callback(null, true); // In dev, allow all. In prod, restrict this.
+        },
+        credentials: true,
+        methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+        allowedHeaders: ['Content-Type', 'Authorization', 'x-user-id']
+    }));
     app.use(express.json());
 
     // Routes

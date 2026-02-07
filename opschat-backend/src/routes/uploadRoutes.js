@@ -1,5 +1,5 @@
 const express = require('express');
-const { s3Client, PutObjectCommand, getSignedUrl, BUCKET_NAME } = require('../config/s3');
+const { s3PublicClient, PutObjectCommand, getSignedUrl, BUCKET_NAME } = require('../config/s3');
 
 const router = express.Router();
 
@@ -18,7 +18,7 @@ router.post('/upload-url', async (req, res) => {
             ContentType: fileType,
         });
 
-        const uploadUrl = await getSignedUrl(s3Client, command, { expiresIn: 60 });
+        const uploadUrl = await getSignedUrl(s3PublicClient, command, { expiresIn: 60 });
         const fileUrl = `${process.env.S3_PUBLIC_URL || 'http://localhost:9000'}/${BUCKET_NAME}/${uniqueKey}`;
 
         res.json({ uploadUrl, fileUrl });

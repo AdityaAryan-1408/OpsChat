@@ -12,7 +12,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U admin -d opschat"]
+      test: [ "CMD-SHELL", "pg_isready -U admin -d opschat" ]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -38,7 +38,22 @@ services:
     command: server /data --console-address ":9001"
     volumes:
       - minio_data:/data
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:9000/minio/health/live" ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
+  # MinIO bucket and CORS initialization
+  minio-init:
+    image: minio/mc
+    container_name: opschat_minio_init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c " mc alias set myminio http://opschat_storage:9000 admin password123; mc mb --ignore-existing myminio/opschat-uploads; mc anonymous set download myminio/opschat-uploads; echo '{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":{\"AWS\":[\"*\"]},\"Action\":[\"s3:GetObject\",\"s3:PutObject\"],\"Resource\":[\"arn:aws:s3:::opschat-uploads/*\"]}]}' > /tmp/policy.json; mc admin policy create myminio uploadpolicy /tmp/policy.json || true; echo 'MinIO bucket and CORS configured!'; exit 0; "
 
   # 4. Backend API
   backend:
@@ -49,30 +64,30 @@ services:
     environment:
       # Database Connection (Using container name 'opschat_db')
       DATABASE_URL: postgres://admin:password123@opschat_db:5432/opschat
-      
+
       # Redis Connection (Using container name 'opschat_redis')
       REDIS_HOST: opschat_redis
       REDIS_PORT: 6379
-      
+
       # MinIO Config (Using container name 'opschat_storage')
-      S3_ENDPOINT: http://opschat_storage
-      S3_PORT: 9000
+      S3_ENDPOINT: http://opschat_storage:9000
+      S3_PUBLIC_URL: http://localhost:9000
       S3_ACCESS_KEY: admin
       S3_SECRET_KEY: password123
       S3_BUCKET: opschat-uploads
       S3_USE_SSL: "false"
-      
+
       # App Config
       PORT: 3000
       # IMPORTANT: In browser, localhost refers to your machine. 
       # Inside Docker, services talk via container names.
       # Since the browser (Frontend) calls the API, CLIENT_URL stays localhost for dev.
-      CLIENT_URL: http://localhost 
+      CLIENT_URL: http://localhost:8080
       JWT_SECRET: dev_secret_key_123
-      
+
       # AI Config (Pass from host .env)
       GROQ_API_KEY: ${GROQ_API_KEY}
-      
+
     depends_on:
       postgres:
         condition: service_healthy
@@ -83,16 +98,15 @@ services:
 
   # 5. Frontend UI
   frontend:
-    build: 
+    build:
       context: ./opschat-frontend
       args:
-        VITE_API_URL: ${VITE_API_URL} 
+        VITE_API_URL: ${VITE_API_URL}
     container_name: opschat_ui
     ports:
-      - "80:80"
+      - "8080:80"
     depends_on:
       - backend
-
 
 # Persistent Volumes
 volumes:
